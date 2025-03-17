@@ -6,7 +6,8 @@
 - https://doc.rust-lang.org/stable/book/	
 
 **Youtube**
-- **Tech With Tim** https://www.youtube.com/watch?v=T_KrYLW4jw8 (Série de vídeos)
+- **Tech With Tim** https://www.youtube.com/watch?v=T_KrYLW4jw8 (Série de vídeos descontinuada)
+- **Bek Brace** https://www.youtube.com/watch?v=rQ_J9WH6CGk (Curso completo duração 03:05:04)
 
 # Instalação
 - https://doc.rust-lang.org/stable/book/ch01-01-installation.html
