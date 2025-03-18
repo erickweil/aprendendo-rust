@@ -1,7 +1,69 @@
+use std::slice::Iter;
+
 use crate::entrada::leia;
 
+pub struct Vec2D<T> {
+    width: usize,  
+    height: usize, 
+    data: Vec<T>
+}
+
+impl<T> Vec2D<T> where T: Clone {
+    pub fn new(width: usize, height: usize, value: T) -> Vec2D<T> {
+        let mut ret = Vec2D { width: width, height: height, data: Vec::new() };
+        ret.data.resize(width * height, value);
+
+        return ret;
+    }
+
+    pub fn _get(&self, pos: (usize,usize)) -> &T {
+         assert!(pos.0 < self.width);
+         assert!(pos.1 < self.height);
+         return &self.data[pos.1 * self.width + pos.0];
+    }
+
+    pub fn set(&mut self, pos: (usize,usize), value: T) {
+         assert!(pos.0 < self.width);
+         assert!(pos.1 < self.height);
+         self.data[pos.1 * self.width + pos.0] = value;
+    }
+
+    pub fn values(&self) -> Iter<T> {
+        return self.data.iter();
+    }
+
+    pub fn _positions(&self) -> Iterator2D {
+        return Iterator2D { width: self.width, height: self.height, pos: (0,0) };
+    }
+}
+
+pub struct Iterator2D {
+    width: usize,  
+    height: usize, 
+    pos: (usize,usize)
+}
+
+impl Iterator for Iterator2D {
+    type Item = (usize,usize);
+    fn next(&mut self) -> Option<Self::Item> {
+        let _pos = self.pos;
+        if _pos.1 >= self.height {
+            return None;
+        }
+
+        self.pos.0 += 1;
+        if self.pos.0 >= self.width {
+            self.pos.0 = 0;
+            self.pos.1 += 1;
+        }
+
+        return Some(_pos);
+    }
+}
+
 #[derive(PartialEq)]
-enum Dir {
+#[derive(Clone, Copy)]
+pub enum Dir {
     Right,
     Up,
     Left,
@@ -9,7 +71,7 @@ enum Dir {
 }
 
 impl Dir {
-    fn counter_clockwise(&self) -> Dir {
+    pub fn counter_clockwise(&self) -> Dir {
         match &self {
             Dir::Right => Dir::Up,
             Dir::Up => Dir::Left,
@@ -18,7 +80,7 @@ impl Dir {
         }
     }
 
-    fn clockwise(&self) -> Dir {
+    pub fn clockwise(&self) -> Dir {
         match &self {
             Dir::Right => Dir::Down,
             Dir::Down => Dir::Left,
@@ -45,36 +107,32 @@ Here, "F" means "draw forward", "+" means "turn left 90°", "-" means "turn righ
 pub struct HIterator<CB> {
     callback: CB,
     dir: Dir,
-    pos: (i32,i32),
-    prev_pos: (i32,i32)
+    pos: (i32,i32)
 }
 
 impl<CB> HIterator<CB>
 where 
-    CB: FnMut((i32,i32),(i32,i32),(i32,i32)),
+    CB: FnMut((i32,i32),Dir),
 {
     pub fn iter(profundidade: i32, callback: CB) {
         let mut iterator = Self {
             callback: callback,
             dir: Dir::Right,
-            pos: (0,0),
-            prev_pos: (-1,0)
+            pos: (0,0)
         };
         iterator.iter_a(profundidade);
         iterator.forward();
     }
 
     fn forward(&mut self) {
-        let _pos = self.pos;
+        (self.callback)(self.pos, self.dir);
 
-        if self.dir == Dir::Right { self.pos.0 += 1; }
-        else if self.dir == Dir::Up { self.pos.1 += 1; }
-        else if self.dir == Dir::Left { self.pos.0 -= 1; }
-        else if self.dir == Dir::Down { self.pos.1 -= 1; }
-        
-        (self.callback)(self.prev_pos, _pos, self.pos);
-
-        self.prev_pos = _pos;
+        match self.dir {
+            Dir::Right => self.pos.0 += 1,
+            Dir::Up => self.pos.1 += 1,
+            Dir::Left => self.pos.0 -= 1,
+            Dir::Down => self.pos.1 -= 1
+        }
     }
 
     fn iter_a(&mut self, depth: i32) {
@@ -106,19 +164,7 @@ where
     }
 }
 
-fn get_dir(a: (i32,i32), b: (i32,i32)) -> Dir {
-    let diff = (b.0 - a.0, b.1 - a.1);
-    if diff.0 == 1 { return Dir::Right; }
-    if diff.1 == 1 { return Dir::Up; }
-    if diff.0 == -1 { return Dir::Left; }
-    if diff.1 == -1 { return Dir::Down; }
-    return Dir::Right;
-}
-
-fn get_line_char(a: (i32,i32), b: (i32,i32), c: (i32,i32)) -> char {
-    let prev = get_dir(a,b);
-    let next = get_dir(b,c);
-    
+fn get_line_char(prev: Dir, next: Dir) -> char {    
     if prev == next {
         if prev == Dir::Right || prev == Dir::Left { return '─'; } else { return '│'; }
     } else {
@@ -135,25 +181,26 @@ pub fn hilbert() {
     let profundidade: i32 = input.parse::<i32>().unwrap_or(3);
     let largura: i32 = (2_i32).pow((profundidade+1) as u32);
     
-    let mut grade: Vec<char> = Vec::new();
-    grade.resize((largura * largura) as usize, '?');
+    // Deve ter 2 caracteres de largura cada quadradinho, para desenhar quadrado no terminal
+    let mut grade = Vec2D::new((largura*2) as usize, largura as usize, '?');
     
-    HIterator::iter(profundidade, |a,b,c| {
-        grade[((largura - 1 - b.1) * largura + b.0) as usize] = get_line_char(a,b,c);
+    let mut prev_dir = Dir::Right;
+    HIterator::iter(profundidade, |pos,dir| {
+        // primeiro caractere é a linha, o segundo pode ser vazio ou continuação da linha '-'
+        let grade_pos = ((pos.0 * 2) as usize, (largura - 1 - pos.1) as usize);
+        grade.set(grade_pos, get_line_char(prev_dir,dir));
+        grade.set((grade_pos.0 + 1, grade_pos.1), 
+            if  pos.0 >= largura - 1 { '\n' }
+            else if dir == Dir::Right || prev_dir == Dir::Left { '─' }
+            else { ' ' }
+        );
+        
+        prev_dir = dir;
     });
     
+    // Após construir a grade de caracteres, imprime todos eles na tela
     println!("");
-    
-    for y in 0..largura {
-        for x in 0..largura {
-            let c = grade[(y * largura + x) as usize];
-            
-            if c == '─' || c == '┌' || c == '└' {
-                print!("{}─",c);
-            } else {
-                print!("{} ",c);
-            }
-        }
-        println!("");
+    for c in grade.values() {
+        print!("{}",*c);
     }
 }
