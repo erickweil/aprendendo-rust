@@ -1,4 +1,4 @@
-use crate::entrada::leia;
+use crate::utils::leia;
 
 pub fn fib() {
     let input = leia("Até quanto contar fibonacci? (padrão 34)");

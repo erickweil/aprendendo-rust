@@ -1,65 +1,5 @@
-use std::slice::Iter;
-
-use crate::entrada::leia;
-
-pub struct Vec2D<T> {
-    width: usize,  
-    height: usize, 
-    data: Vec<T>
-}
-
-impl<T> Vec2D<T> where T: Clone {
-    pub fn new(width: usize, height: usize, value: T) -> Vec2D<T> {
-        let mut ret = Vec2D { width: width, height: height, data: Vec::new() };
-        ret.data.resize(width * height, value);
-
-        return ret;
-    }
-
-    pub fn _get(&self, pos: (usize,usize)) -> &T {
-         assert!(pos.0 < self.width);
-         assert!(pos.1 < self.height);
-         return &self.data[pos.1 * self.width + pos.0];
-    }
-
-    pub fn set(&mut self, pos: (usize,usize), value: T) {
-         assert!(pos.0 < self.width);
-         assert!(pos.1 < self.height);
-         self.data[pos.1 * self.width + pos.0] = value;
-    }
-
-    pub fn values(&self) -> Iter<T> {
-        return self.data.iter();
-    }
-
-    pub fn _positions(&self) -> Iterator2D {
-        return Iterator2D { width: self.width, height: self.height, pos: (0,0) };
-    }
-}
-
-pub struct Iterator2D {
-    width: usize,  
-    height: usize, 
-    pos: (usize,usize)
-}
-
-impl Iterator for Iterator2D {
-    type Item = (usize,usize);
-    fn next(&mut self) -> Option<Self::Item> {
-        let _pos = self.pos;
-        if _pos.1 >= self.height {
-            return None;
-        }
-
-        self.pos.0 += 1;
-        if self.pos.0 >= self.width {
-            self.pos.0 = 0;
-            self.pos.1 += 1;
-        }
-
-        return Some(_pos);
-    }
-}
+use crate::utils::leia;
+use crate::estruturas::Vec2D;
 
 #[derive(PartialEq)]
 #[derive(Clone, Copy)]
@@ -114,6 +54,16 @@ impl<CB> HIterator<CB>
 where 
     CB: FnMut((i32,i32),Dir),
 {
+    /**
+     * Faz uma iteração em uma grade seguindo a curva de hilbert
+     * O valor de profundidade indica o tamanho da grade da curva:
+     * 0: 2x2
+     * 1: 4x4
+     * 2: 8x8
+     * 3: 16x16
+     * ...
+     * n: 2^(n+1)
+     */
     pub fn iter(profundidade: i32, callback: CB) {
         let mut iterator = Self {
             callback: callback,
@@ -124,6 +74,10 @@ where
         iterator.forward();
     }
 
+    /**
+     * "F" means "draw forward"
+     * Chama a callback e anda para frente de acordo com a direção
+     */ 
     fn forward(&mut self) {
         (self.callback)(self.pos, self.dir);
 
@@ -135,6 +89,9 @@ where
         }
     }
 
+    /**
+     * A → +BF−AFA−FB+
+     */
     fn iter_a(&mut self, depth: i32) {
         self.dir = self.dir.counter_clockwise();     
         if depth > 0 { self.iter_b(depth-1) } 
@@ -149,6 +106,9 @@ where
         self.dir = self.dir.counter_clockwise();
     }
 
+    /**
+     * B → −AF+BFB+FA−
+     */
     fn iter_b(&mut self, depth: i32) {
         self.dir = self.dir.clockwise();
         if depth > 0 { self.iter_a(depth-1) }
@@ -179,21 +139,29 @@ fn get_line_char(prev: Dir, next: Dir) -> char {
 pub fn hilbert() {
     let input = leia("Qual a profundidade da curva de Hilbert? (padrão 3)");
     let profundidade: i32 = input.parse::<i32>().unwrap_or(3);
+
+    if profundidade < 0 || profundidade > 10 {
+        println!("Deve escolher um valor entre 0 e 10 para profundidade.");
+        return;
+    }
+
     let largura: i32 = (2_i32).pow((profundidade+1) as u32);
     
+    // Constrói a grade vazia de caracteres
     // Deve ter 2 caracteres de largura cada quadradinho, para desenhar quadrado no terminal
     let mut grade = Vec2D::new((largura*2) as usize, largura as usize, '?');
     
+    // Atravessa a curva preenchendo a grade
     let mut prev_dir = Dir::Right;
-    HIterator::iter(profundidade, |pos,dir| {
+    HIterator::iter(profundidade, |(x,y),dir| {
         // primeiro caractere é a linha, o segundo pode ser vazio ou continuação da linha '-'
-        let grade_pos = ((pos.0 * 2) as usize, (largura - 1 - pos.1) as usize);
-        grade.set(grade_pos, get_line_char(prev_dir,dir));
-        grade.set((grade_pos.0 + 1, grade_pos.1), 
-            if  pos.0 >= largura - 1 { '\n' }
+        let (gx, gy) = ((x * 2) as usize, (largura - 1 - y) as usize);
+        grade[(gx, gy)] = get_line_char(prev_dir,dir);
+        grade[(gx + 1, gy)] = 
+            if  x >= largura - 1 { '\n' }
             else if dir == Dir::Right || prev_dir == Dir::Left { '─' }
             else { ' ' }
-        );
+        ;
         
         prev_dir = dir;
     });

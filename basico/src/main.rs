@@ -1,11 +1,11 @@
 use std::env;
+use utils::leia;
 
-mod entrada;
-use entrada::leia;
+mod exemplos;
+mod estruturas;
+mod utils;
 
-mod fib;
-mod memoria;
-mod hilbert;
+const DIVISORIA: &str = "--------------------------------------------------------------------------------";
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -28,24 +28,24 @@ fn main() {
             break;
         }
 
-        println!("--------------------------------------------------------------------------------");
+        println!("{}",DIVISORIA);
         loop {
             if escolha == "fib" {
-                fib::fib();
+                exemplos::fib();
             } else if escolha == "memoria" {
-                memoria::memoria();
+                exemplos::memoria();
             } else if escolha == "hilbert" {
-                hilbert::hilbert();
+                exemplos::hilbert();
             } else {
                 println!("Nenhum programa com este nome '{}'", escolha);
             }
 
-            println!("--------------------------------------------------------------------------------");
+            println!("{}",DIVISORIA);
             let resposta = leia("Deseja executar denovo? [S]/n").to_lowercase();
             if resposta != "s" && resposta != "" {
                 break;
             } else {
-                println!("--------------------------------------------------------------------------------");
+                println!("{}",DIVISORIA);
             }
         }        
 
