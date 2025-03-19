@@ -6,3 +6,6 @@ pub use hilbert::*;
 
 mod memoria;
 pub use memoria::*;
+
+mod life;
+pub use life::*;

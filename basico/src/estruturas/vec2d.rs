@@ -53,6 +53,12 @@ pub struct Iterator2D {
     pos: (usize,usize)
 }
 
+impl Iterator2D {
+    pub fn xy((width, height): (usize, usize)) -> Iterator2D {
+        return Iterator2D { width: width, height: height, pos: (0,0) };
+    }
+}
+
 impl Iterator for Iterator2D {
     type Item = (usize,usize);
     fn next(&mut self) -> Option<Self::Item> {

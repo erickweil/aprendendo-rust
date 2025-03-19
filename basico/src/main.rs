@@ -20,6 +20,7 @@ fn main() {
             println!("- fib");
             println!("- memoria");
             println!("- hilbert");
+            println!("- life");
             
             escolha = leia("").to_lowercase();
         }
@@ -36,6 +37,8 @@ fn main() {
                 exemplos::memoria();
             } else if escolha == "hilbert" {
                 exemplos::hilbert();
+            } else if escolha == "life" {
+                exemplos::life();
             } else {
                 println!("Nenhum programa com este nome '{}'", escolha);
             }
