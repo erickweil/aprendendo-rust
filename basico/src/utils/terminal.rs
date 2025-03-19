@@ -1,11 +1,10 @@
 // https://en.wikipedia.org/wiki/ANSI_escape_code
 // https://medium.com/@protiumx/creating-a-text-based-ui-with-rust-2d8eaff7fe8b
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use crossterm::execute;
-use crossterm::terminal::{size, Clear, SetSize};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::terminal::Clear;
 use crossterm::{
-    cursor::{Hide, Show, MoveTo},
+    cursor::{Hide, Show},
     style::*,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
@@ -14,64 +13,28 @@ use crossterm::{
 use std::io::{stdout, Stdout};
 use std::{io::{self, Write}, thread::sleep, time::Duration};
 
+pub trait TerminalHandler {
+    fn on_draw(&mut self, _terminal: &mut Terminal) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn on_key_event(&mut self, _key_event: &KeyEvent) {
+
+    }
+}
+
 pub struct Terminal {
     pub stdout: Stdout
 }
 
 // https://blog.stackademic.com/rust-terminal-manipulation-with-crossterm-d14e76617a3d
 impl Terminal {
-
     pub fn new() -> Terminal {
-        let mut out = stdout();
-        terminal::enable_raw_mode().unwrap();
-        out.execute(EnterAlternateScreen).unwrap();
-        out.execute(Hide).unwrap();
-        
-        Terminal { stdout: out }
+        Terminal { stdout: stdout() }
     }
 
-    pub fn reset(&mut self) {
-        self.stdout.execute(Show).unwrap();
-        self.stdout.execute(LeaveAlternateScreen).unwrap();
-        terminal::disable_raw_mode().unwrap();
-    }
-
-    pub fn get_size(&mut self) -> (u16, u16) {
-        return size().unwrap();
-    }
-
-    /**
-     * https://github.com/rust-lang/rust/issues/74964
-     * Vai para (1,1) e limpa a tela, sem histórico de linhas
-     */
-    pub fn clear(&mut self) {
-        //print!("{ESC}[H{ESC}[2J{ESC}[3J");
-        self.stdout.execute(Clear(terminal::ClearType::All)).unwrap();
-    }
-
-    /**
-     * Moves the cursor to row n, column m. The values are 1-based, (1,1) is top left corner
-     */
-    pub fn cursor_position(&mut self, (x,y): (u16,u16)) {
-        //if x < 1 || y < 1 { panic!("Deve ser maior ou igual à 1"); }
-        //print!("{ESC}[{x};{y}H");
-        self.stdout.execute(MoveTo(x,y)).unwrap();
-    }
-
-    pub fn set_background_color(&mut self, color: Color) {
-        self.stdout.execute(SetBackgroundColor(color)).unwrap();
-    }
-
-    pub fn set_foreground_color(&mut self, color: Color) {
-        self.stdout.execute(SetForegroundColor(color)).unwrap();
-    }
-
-    pub fn flush(&self) {
-        io::stdout().flush().unwrap();
-    }
-
-    pub fn read_event(&self) -> Option<Event> {
-        match event::poll(Duration::from_secs(0)) {
+    fn nonblocking_read_event(&self, timeout: u64) -> Option<Event> {
+        match event::poll(Duration::from_millis(timeout)) {
             Ok(true) => {
                 match event::read() {
                     Ok(event) => Some(event),
@@ -83,61 +46,54 @@ impl Terminal {
         }
     }
 
-    pub fn should_exit(&self, event: &Event) -> bool {
-        if let Event::Key(key_event) = event.to_owned() {
-            if key_event.code == KeyCode::Esc
-                || (key_event.code == KeyCode::Char('c')
-                    && key_event.modifiers == KeyModifiers::CONTROL)
-            {
-                return true;
-            }
-        }
-    
-        return false;
-    }
+    /**
+     * A forma que delay funciona é que irá esperar esse tanto em milissegundos até o próximo evento, ou então se tiver evento já não irá esperar
+     * Assim pode colocar o delay um valor alto, mas quando houver input a tela vai atualizar mais rápido
+     */
+    pub fn main_loop<H: TerminalHandler>(&mut self, delay: u64, draw_on_event: bool, mut handler: H) -> io::Result<()> {
+        terminal::enable_raw_mode()?;
+        self.stdout.execute(EnterAlternateScreen)?;
+        self.stdout.execute(Hide)?;
 
-    pub fn main_loop<CB: FnMut(&mut Terminal)>(&mut self, delay: u64, mut callback: CB) {
-        loop {
-            let event = self.read_event();
-            if let Some(event) = event {
-                if self.should_exit(&event) == true {
+        'main: loop {
+            // Consumir todos os eventos
+            let mut first_event = true;
+            loop {
+                let event = self.nonblocking_read_event(if first_event && draw_on_event { delay } else { 0 });
+                first_event = false;
+
+                if let Some(event) = event {
+                    if let Event::Key(key_event) = event.to_owned() {
+                        // CTRL + C
+                        if key_event.code == KeyCode::Esc || (
+                                key_event.code == KeyCode::Char('c')
+                                && key_event.modifiers == KeyModifiers::CONTROL
+                        ) {
+                            break 'main;
+                        }
+                        handler.on_key_event(&key_event);
+                    }
+                } else {
+                    // Acabaram os eventos
                     break;
                 }
             }
-            callback(self);
+            // Executa operações no terminal
+            handler.on_draw(self)?;
 
-            self.flush();
-            sleep(Duration::from_millis(delay));
+            // Escreve tudo e espera um tempo
+            self.stdout.flush()?;
+            if !draw_on_event {
+                sleep(Duration::from_millis(delay));
+            }
         }
     
-        self.clear();
-        self.reset();
+        self.stdout.execute(Clear(terminal::ClearType::All))?;
+        self.stdout.execute(Show)?;
+        self.stdout.execute(LeaveAlternateScreen)?;
+        terminal::disable_raw_mode()?;
+
+        self.stdout.execute(ResetColor)?;
+        Ok(())
     }
-}
-
-pub fn _exemplo() {
-    let mut t = Terminal::new();
-
-    let mut pos = (1,1);
-    let size = t.get_size();
-    t.set_background_color(Color::Black);
-    t.set_foreground_color(Color::Green);
-    t.main_loop(100, |t| {
-        t.clear();
-
-        pos.0 += 1;
-        if pos.0 >= size.0 { pos.0 = 0; }
-        pos.1 += 1;
-        if pos.1 >= size.1 { pos.1 = 0; }
-        t.cursor_position(pos);
-        print!("HELLO ");
-        print!("WORLD");
-        //println!("HELLO");
-    });  
-
-    println!("");
-    println!("");
-    println!("");
-    println!("");
-    println!("");
 }
