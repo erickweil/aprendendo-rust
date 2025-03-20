@@ -3,7 +3,8 @@
 - https://app.codecrafters.io/tracks/rust	
 
 **Livro**
-- https://doc.rust-lang.org/stable/book/	
+- https://rust-book.cs.brown.edu/ - The Rust Programming Language (Experiment, interactive)
+- https://rust-unofficial.github.io/too-many-lists/ Learn Rust With Entirely Too Many Linked Lists (Linked List in rust Overview)
 
 **Youtube**
 - **Tech With Tim** https://www.youtube.com/watch?v=T_KrYLW4jw8 (Série de vídeos descontinuada)
@@ -173,3 +174,6 @@ fn main() {
     println!("{}", input);
 }
 ```
+
+# Memória, Ownership e Borrow Checker
+

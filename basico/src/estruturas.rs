@@ -4,5 +4,5 @@ pub use vec2d::*;
 mod dir;
 pub use dir::*;
 
-mod linked_list;
-pub use linked_list::*;
+mod linked_stack;
+pub use linked_stack::*;

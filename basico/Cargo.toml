@@ -3,6 +3,12 @@ name = "basico"
 version = "0.1.0"
 edition = "2024"
 
+[lints.rust]
+# Ninguém merece aviso que código não usado, calma aí eu vou usar ainda (algum dia)
+unused = "allow"
+# if you wish, you can even toss #![forbid(unsafe_code)] into your code base to statically guarantee that you're only writing Safe Rust.
+unsafe_code = "forbid"
+
 [dependencies]
 crossterm = "0.28.1"
 rand = "0.9.0"

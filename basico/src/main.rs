@@ -1,5 +1,4 @@
 use std::env;
-use estruturas::_test_linked_list;
 use utils::leia;
 
 mod exemplos;
@@ -42,8 +41,6 @@ fn main() {
                 exemplos::life();
             } else if escolha == "snake" {
                 exemplos::snake();
-            } else if escolha == "test" {
-                _test_linked_list();
             } else {
                 println!("Nenhum programa com este nome '{}'", escolha);
             }
