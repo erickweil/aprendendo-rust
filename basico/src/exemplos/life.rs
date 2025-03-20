@@ -1,5 +1,4 @@
 use std::io;
-use std::io::Write;
 use std::mem;
 
 use crossterm::{cursor::*, event::KeyCode, style::*, terminal::*, ExecutableCommand, QueueableCommand};
