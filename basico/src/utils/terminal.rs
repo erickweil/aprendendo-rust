@@ -2,7 +2,7 @@
 // https://medium.com/@protiumx/creating-a-text-based-ui-with-rust-2d8eaff7fe8b
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::Clear;
+use crossterm::terminal::{BeginSynchronizedUpdate, Clear, EndSynchronizedUpdate};
 use crossterm::{
     cursor::{Hide, Show},
     style::*,
@@ -78,11 +78,14 @@ impl Terminal {
                     break;
                 }
             }
+            self.stdout.execute(BeginSynchronizedUpdate)?;
             // Executa operações no terminal
             handler.on_draw(self)?;
 
             // Escreve tudo e espera um tempo
             self.stdout.flush()?;
+
+            self.stdout.execute(EndSynchronizedUpdate)?;
             if !draw_on_event {
                 sleep(Duration::from_millis(delay));
             }
