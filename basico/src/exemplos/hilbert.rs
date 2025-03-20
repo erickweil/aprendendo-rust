@@ -1,34 +1,5 @@
 use crate::utils::leia;
-use crate::estruturas::Vec2D;
-
-#[derive(PartialEq)]
-#[derive(Clone, Copy)]
-pub enum Dir {
-    Right,
-    Up,
-    Left,
-    Down
-}
-
-impl Dir {
-    pub fn counter_clockwise(&self) -> Dir {
-        match &self {
-            Dir::Right => Dir::Up,
-            Dir::Up => Dir::Left,
-            Dir::Left => Dir::Down,
-            Dir::Down => Dir::Right,
-        }
-    }
-
-    pub fn clockwise(&self) -> Dir {
-        match &self {
-            Dir::Right => Dir::Down,
-            Dir::Down => Dir::Left,
-            Dir::Left => Dir::Up,
-            Dir::Up => Dir::Right,
-        }
-    }
-}
+use crate::estruturas::{Dir, Vec2D};
 
 /**
 https://en.wikipedia.org/wiki/Hilbert_curve
@@ -81,12 +52,9 @@ where
     fn forward(&mut self) {
         (self.callback)(self.pos, self.dir);
 
-        match self.dir {
-            Dir::Right => self.pos.0 += 1,
-            Dir::Up => self.pos.1 += 1,
-            Dir::Left => self.pos.0 -= 1,
-            Dir::Down => self.pos.1 -= 1
-        }
+        let off = self.dir.to_xy();
+        self.pos.0 += off.0;
+        self.pos.1 += off.1;
     }
 
     /**

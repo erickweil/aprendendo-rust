@@ -9,3 +9,6 @@ pub use memoria::*;
 
 mod life;
 pub use life::*;
+
+mod snake;
+pub use snake::*;
