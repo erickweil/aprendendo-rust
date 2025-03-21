@@ -20,24 +20,19 @@ pub trait Queue<T> {
     }
 
     /**
-     * 'Empresta' o valor do final da fila (Do lado que insere)
-     */
-    fn head(&self) -> Option<&T>;
-
-    /**
-     * 'Empresta' o valor do início da fila (Do lado que remove)
-     */
-    fn tail(&self) -> Option<&T>;
-
-    /**
      * Remove um elemento do início da fila
      */
     fn dequeue(&mut self) -> Option<T>;
 
     /**
-     * Obtêm o tamanho da fila
+     * 'Empresta' o valor do início da fila (Do lado que remove, o próximo que seria retornado por dequeue())
      */
-    fn len(&self) -> i32;
+    fn head(&self) -> Option<&T>;
+
+    /**
+     * 'Empresta' o valor do final da fila (Do lado que insere, o último que foi inserido com enqueue())
+     */
+    fn tail(&self) -> Option<&T>;
 }
 
 pub struct DoubleStackQueue<T> {
@@ -62,6 +57,10 @@ impl<T> DoubleStackQueue<T> {
     pub fn iter(&self) -> DoubleStackQueueIterator<T> {
         DoubleStackQueueIterator { queue: &self, index: 0 }
     }
+
+    fn len(&self) -> i32 {
+        return (self.entrada.len() + self.saida.len()) as i32;
+    }
 }
 
 impl<T> Queue<T> for DoubleStackQueue<T> {
@@ -69,14 +68,14 @@ impl<T> Queue<T> for DoubleStackQueue<T> {
         self.entrada.push(value);
     }
 
-    fn head(&self) -> Option<&T> {
+    fn tail(&self) -> Option<&T> {
         if self.entrada.len() > 0 {
             return self.entrada.last();
         }
         return self.saida.first();        
     }
 
-    fn tail(&self) -> Option<&T> {
+    fn head(&self) -> Option<&T> {
         if self.saida.len() <= 0 {
             return self.entrada.first();
         }
@@ -93,10 +92,6 @@ impl<T> Queue<T> for DoubleStackQueue<T> {
             }
         }
         return self.saida.pop();
-    }
-
-    fn len(&self) -> i32 {
-        return (self.entrada.len() + self.saida.len()) as i32;
     }
 }
 
@@ -128,12 +123,8 @@ impl<'a,T> Iterator for DoubleStackQueueIterator<'a,T> {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::DoubleStackQueue;
-    use super::Queue;
-
-    pub fn run_queue_tests<T: Queue<char>>(queue: &mut T) {
+pub fn run_queue_tests<T: Queue<char>>(queue: &mut T) {
+    for iter in 0..3 {
         assert_eq!(queue.head(), None);
         assert_eq!(queue.tail(), None);
 
@@ -141,9 +132,9 @@ mod test {
         queue.enqueue('D');
         queue.enqueue('E');
 
-        assert_eq!(queue.len(), 5);
-        assert_eq!(queue.tail(), Some(&'A'));
-        assert_eq!(queue.head(), Some(&'E'));
+        //assert_eq!(queue.len(), 5);
+        assert_eq!(queue.head(), Some(&'A'));
+        assert_eq!(queue.tail(), Some(&'E'));
 
         assert_eq!(queue.dequeue(), Some('A'));
         assert_eq!(queue.dequeue(), Some('B'));
@@ -153,9 +144,15 @@ mod test {
         assert_eq!(queue.dequeue(), Some('E'));
         assert_eq!(queue.dequeue(), Some('F'));
         assert_eq!(queue.dequeue(), None);
-
-        assert_eq!(queue.len(), 0);
     }
+    //assert_eq!(queue.len(), 0);
+}
+
+#[cfg(test)]
+mod test {
+    use super::run_queue_tests;
+    use super::DoubleStackQueue;
+    use super::Queue;
 
     #[test]
     pub fn double_stack_queue() {

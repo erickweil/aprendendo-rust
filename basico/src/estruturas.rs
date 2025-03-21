@@ -9,3 +9,6 @@ pub use stack::*;
 
 mod queue;
 pub use queue::*;
+
+mod linked_list;
+pub use linked_list::*;

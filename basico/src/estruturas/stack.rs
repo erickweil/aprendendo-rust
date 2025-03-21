@@ -26,11 +26,6 @@ pub trait Stack<T> {
      * 'Empresta' o valor do topo da pilha. não irá remover
      */
     fn peek(&self) -> Option<&T>;
-
-    /**
-     * Obtêm o tamanho da pilha
-     */
-    fn len(&self) -> i32;
 }
 
 struct LinkNode<T> {
@@ -70,10 +65,14 @@ impl<T> LinkedStack<T> {
         Box::new(LinkNode { value: value, next: next })
     }
 
-    pub fn iter(&self) -> LinkedListIterator<T> {
-        LinkedListIterator { 
+    pub fn iter(&self) -> LinkedStackIter<T> {
+        LinkedStackIter { 
             atual: self.first.as_ref()
         }
+    }
+
+    fn len(&self) -> i32 {
+        self.length
     }
 }
 
@@ -105,10 +104,6 @@ impl<T> Stack<T> for LinkedStack<T> {
             None => { return None },
         }
     }
-
-    fn len(&self) -> i32 {
-        self.length
-    }
 }
 
 impl<T: fmt::Debug> fmt::Debug for LinkedStack<T> {
@@ -132,11 +127,11 @@ impl<T: fmt::Debug> fmt::Debug for LinkedStack<T> {
 }
 
 // 'a lifetime, atual deve viver tanto quanto a instância da struct
-pub struct LinkedListIterator<'a,T> {
+pub struct LinkedStackIter<'a,T> {
     atual: Option<&'a Box<LinkNode<T>>>
 }
 
-impl<'a,T> Iterator for LinkedListIterator<'a,T> {
+impl<'a,T> Iterator for LinkedStackIter<'a,T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(atual) = self.atual {
@@ -150,20 +145,15 @@ impl<'a,T> Iterator for LinkedListIterator<'a,T> {
     }
 }
 
-// cargo test --package basico --bin basico -- estruturas::linked_stack::test --show-output
-#[cfg(test)]
-mod test {
-    use super::LinkedStack;
-    use super::Stack;
-
-    pub fn run_stack_tests<T: Stack<char>>(stack: &mut T) {
+pub fn run_stack_tests<T: Stack<char>>(stack: &mut T) {
+    for iter in 0..3 {
         assert_eq!(stack.peek(), None);
 
         stack.push_values(['A','B','C']);
         stack.push('D');
         stack.push('E');
 
-        assert_eq!(stack.len(), 5);
+        //assert_eq!(stack.len(), 5);
         assert_eq!(stack.peek(), Some(&'E'));
 
         assert_eq!(stack.pop(), Some('E'));
@@ -174,9 +164,19 @@ mod test {
         assert_eq!(stack.pop(), Some('B'));
         assert_eq!(stack.pop(), Some('A'));
         assert_eq!(stack.pop(), None);
-
-        assert_eq!(stack.len(), 0);
     }
+
+    //assert_eq!(stack.len(), 0);
+}
+
+// cargo test --package basico --bin basico -- estruturas::linked_stack::test --show-output
+#[cfg(test)]
+mod test {
+    use super::run_stack_tests;
+    use super::LinkedStack;
+    use super::Stack;
+
+    
 
     #[test]
     pub fn linked_stack() {

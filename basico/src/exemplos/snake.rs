@@ -15,7 +15,7 @@ struct Snake {
 impl Snake {
     pub fn slither(&mut self, size: (i32,i32)) -> bool {
         let off = self.dir.to_xy();
-        let pos = self.head();
+        let pos = self.snake_head();
         let new_pos = (pos.0 + off.0, pos.1 - off.1);
 
         if self.check_collision_self(new_pos) {
@@ -52,8 +52,8 @@ impl Snake {
         return false;
     }
 
-    pub fn head(&self) -> (i32,i32) {
-        return *self.body.head().expect("Cobra não existe?")
+    pub fn snake_head(&self) -> (i32,i32) {
+        return *self.body.tail().expect("Cobra não existe?")
     }
 }
 
@@ -113,7 +113,7 @@ impl SnakeGame {
             return GameState::End; // FIM DO JOGO, colidiu
         }
 
-        if self.player.head() == self.fruit {
+        if self.player.snake_head() == self.fruit {
             self.score += 1;            
             self.fruit = if let Some(pos) = self.gen_fruit_pos() { pos } else {
                 return GameState::End; // FIM DO JOGO, NÃO CONSEGUIU GERAR FRUTA, A COBRA COBRIU O MAPA INTEIRO
@@ -150,7 +150,7 @@ impl TerminalHandler for SnakeGame {
         }
         
         let fruit_pos = self.fruit;
-        let head_pos = self.player.head();
+        let head_pos = self.player.snake_head();
         let prev_tail_pos = self.player.prev_tail;
 
         // Barra inferior de informações
