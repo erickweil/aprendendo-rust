@@ -12,3 +12,6 @@ pub use queue::*;
 
 mod linked_list;
 pub use linked_list::*;
+
+mod vecpool;
+pub use vecpool::*;

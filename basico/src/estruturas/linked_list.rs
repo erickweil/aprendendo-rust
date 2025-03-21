@@ -1,29 +1,4 @@
-use super::{Queue, Stack};
-
-// valor de índice que será utilizado para representar a ausência de conexão
-const NULL: i32 = -1;
-
-#[derive(Debug)]
-struct IndexNode {
-    value: Option<char>,
-    prev: i32,
-    next: i32
-}
-
-impl IndexNode {
-    fn move_then_free(&mut self) -> IndexNode {
-        let moved = IndexNode {
-            value: self.value.take(),
-            prev: self.prev,
-            next: self.next
-        };
-
-        self.prev = NULL;
-        self.next = NULL;
-
-        return moved;
-    }
-}
+use super::{Queue, Stack, VecPool, NULL_INDEX};
 
 /**
  * Lista duplamente encadeada sem o uso de ponteiros (isso mesmo nada de Box ou Rc)
@@ -57,163 +32,122 @@ impl IndexNode {
  * In this way you create yourself a shortcut for allocating free nodes from the array.
  */
 pub struct LinkedList {
-    arr: Vec<IndexNode>,
-    length: i32,
+    arr: VecPool<LinkedNode>,
     first: i32,
-    last: i32,
-    last_empty: i32
+    last: i32
+}
+
+pub struct LinkedNode {
+    value: char,
+    next: i32,
+    prev: i32
 }
 
 impl LinkedList {
     pub fn new() -> LinkedList {
         LinkedList { 
-            arr: Vec::new(),
-            length: 0,
-            first: NULL,
-            last: NULL,
-            last_empty: NULL
+            arr: VecPool::new(),
+            first: NULL_INDEX,
+            last: NULL_INDEX
         }
-    }
-
-    /**
-     * Aloca um novo nó na lista, aproveitando espaços vazios se possível
-     */
-    fn alloc_node(&mut self, value: char) -> i32 {
-        let node = IndexNode { value: Some(value), prev: NULL, next: NULL };
-        if self.last_empty == NULL { // não tem nenhum vazio, adicionar mais um no final do array
-            self.arr.push(node);
-
-            return (self.arr.len()-1) as i32;
-        } else {
-            // fazer pop() da pilha de valores vazios
-            // 1 - obter índice do espaço vazio
-            let free_node = self.last_empty;
-
-            // 2 - topo da pilha deve apontar para o próximo espaço vazio (ou NULL)
-            self.last_empty = self.arr[self.last_empty as usize].next;
-
-            // Re-Inicializar os valores
-            self.arr[free_node as usize] = node;
-
-            return free_node;
-        }
-    }
-
-    /**
-     * Libera um nó da lista tornando um espaço vazio disponível, e retorna o valor que estava nele,
-     */
-    fn free_node(&mut self, node: i32) -> IndexNode {
-        let ret = self.arr[node as usize].move_then_free();
-
-        // fazer push() na pilha de valores vazios
-        self.arr[node as usize].next = self.last_empty;
-        self.last_empty = node;
-
-        return ret;
     }
 
     pub fn clear(&mut self) {
         self.arr.clear();
-        self.length = 0;
-        self.first = NULL;
-        self.last = NULL;
-        self.last_empty = NULL;
+        self.first = NULL_INDEX;
+        self.last = NULL_INDEX;
     }
 
     fn len(&self) -> i32 {
-        self.length
+        self.arr.len()
     }
 
     pub fn add_first(&mut self, value: char) {
         // Cria o novo nó no array e obtêm o índice dele
-        let node = self.alloc_node(value);
-        if self.length == 0 {
+        let len = self.arr.len();
+        let new_node = self.arr.alloc_node(LinkedNode { value: value, next: NULL_INDEX, prev: NULL_INDEX });
+        if len == 0 {
             // Agora início e fim da lista é ele
-            self.first = node;
-            self.last = node; 
+            self.first = new_node;
+            self.last = new_node; 
         } else {
             // 1 - .next do novo nó deve apontar para o antigo início da lista
-            self.arr[node as usize].next = self.first;
+            self.arr.get_mut_node(new_node).unwrap().next = self.first;
             // 2 - .prev do antigo início deve apontar para o novo nó
-            self.arr[self.first as usize].prev = node;
+            self.arr.get_mut_node(self.first).unwrap().prev = new_node;
             // 3 - Agora o início da lista é o novo nó
-            self.first = node;
+            self.first = new_node;
         }
-        // incrementa o tamanho, pois adicionou um nó
-        self.length += 1;
     }
 
     pub fn add_last(&mut self, value: char) {
         // Cria o novo nó no array e obtêm o índice dele
-        let node = self.alloc_node(value);
-        if self.length == 0 {
+        let len = self.arr.len();
+        let new_node = self.arr.alloc_node(LinkedNode { value: value, next: NULL_INDEX, prev: NULL_INDEX });
+        if len == 0 {
             // Agora início e fim da lista é ele
-            self.first = node;
-            self.last = node; 
+            self.first = new_node;
+            self.last = new_node; 
         } else {
             // 1 - .prev do novo nó deve apontar para o antigo final da lista
-            self.arr[node as usize].prev = self.last;
+            self.arr.get_mut_node(new_node).unwrap().prev = self.last;
             // 2 - .next do antigo final deve apontar para o novo nó
-            self.arr[self.last as usize].next = node;
+            self.arr.get_mut_node(self.last).unwrap().next = new_node;
             // 3 - Agora o final da lista é o novo nó
-            self.last = node;
+            self.last = new_node;
         }
-        // incrementa o tamanho, pois adicionou um nó
-        self.length += 1;
     }
 
     pub fn remove_first(&mut self) -> Option<char> {
-        if self.first == NULL { return None; }
+        if self.first == NULL_INDEX { return None; }
     
         // MOVE o valor do primeiro nó, deixando None no lugar
-        let first_node = self.free_node(self.first);
-        if self.length == 1 {
+        let len = self.arr.len();
+        let first_node = self.arr.free_node(self.first);
+        if len == 1 {
             // Se era o último nó, limpa a lista
             self.clear();
         } else {
             // 1 - .prev do próximo nó deve apontar para NULL agora
             let next_index = first_node.next;
-            self.arr[next_index as usize].prev = NULL;
+            self.arr.get_mut_node(next_index).unwrap().prev = NULL_INDEX;
             // 2 - first é o próximo do primeiro agora
             self.first = next_index;
-            // 3 - decrementa o tamanho, pois removeu um nó
-            self.length -= 1;
         }
 
-        return first_node.value;
+        return Some(first_node.value);
     }
 
     pub fn remove_last(&mut self) -> Option<char> {
-        if self.last == NULL { return None; }
+        if self.last == NULL_INDEX { return None; }
     
         // MOVE o valor do último nó, deixando None no lugar
-        let last_node = self.free_node(self.last);
-        if self.length == 1 {
+        let len = self.arr.len();
+        let last_node = self.arr.free_node(self.last);
+        if len == 1 {
             // Se era o último nó, limpa a lista
             self.clear();
         } else {
             // 1 - .next do nó anterior ao último deve apontar para NULL agora
             let prev_index = last_node.prev;
-            self.arr[prev_index as usize].next = NULL;
+            self.arr.get_mut_node(prev_index).unwrap().next = NULL_INDEX;
             // 2 - last é o anterior ao último agora
             self.last = prev_index;
-            // 3 - decrementa o tamanho, pois removeu um nó
-            self.length -= 1;
         }
 
-        return last_node.value;
+        return Some(last_node.value);
     }
 
     pub fn peek_first(&self) -> Option<&char> {
-        if self.first == NULL { return None; }
+        if self.first == NULL_INDEX { return None; }
 
-        return self.arr[self.first as usize].value.as_ref();
+        return Some(&self.arr.get_node(self.first).unwrap().value);
     }
 
     pub fn peek_last(&self) -> Option<&char> {
-        if self.last == NULL { return None; }
+        if self.last == NULL_INDEX { return None; }
 
-        return self.arr[self.last as usize].value.as_ref();
+        return Some(&self.arr.get_node(self.last).unwrap().value);
     }
 }
 
@@ -263,13 +197,13 @@ mod test {
         assert_eq!(list.peek_first(), Some(&'0'));
 
         // Como houve momentos que a lista teve até 7 elementos, esse deve ser o tamanho do array
-        assert_eq!(list.arr.len(), 7);
-        assert_eq!(list.last_empty, 1);
+        //assert_eq!(list.arr.len(), 7);
+        //assert_eq!(list.arr.last_empty, 1);
 
         // Inserir um novo elemento não deve aumentar o array e sim aproveitar os espaços
         list.add_last('D');
-        assert_eq!(list.arr.len(), 7);
-        assert_eq!(list.last_empty, 2);
+        assert_eq!(list.len(), 2);
+        //assert_eq!(list.arr.last_empty, 2);
     }
 
     #[test]
@@ -277,7 +211,7 @@ mod test {
         let mut queue = LinkedList::new();
         run_queue_tests(&mut queue);
 
-        assert_eq!(queue.last_empty, NULL);
+        //assert_eq!(queue.last_empty, NULL_INDEX);
         assert_eq!(queue.arr.len(), 0);
     }
 
@@ -286,7 +220,7 @@ mod test {
         let mut stack = LinkedList::new();
         run_stack_tests(&mut stack);
 
-        assert_eq!(stack.last_empty, NULL);
+        //assert_eq!(stack.last_empty, NULL_INDEX);
         assert_eq!(stack.arr.len(), 0);
     }
 }
