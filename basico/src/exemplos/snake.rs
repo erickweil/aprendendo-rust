@@ -1,15 +1,13 @@
-use std::{collections::{HashSet, VecDeque}, io};
+use std::io;
 
 use rand::Rng;
 
 use crossterm::{cursor::MoveTo, event::KeyCode, style::{Color, Print, SetBackgroundColor, SetForegroundColor}, terminal::{size, DisableLineWrap, EnableLineWrap}, ExecutableCommand, QueueableCommand};
 
-use crate::{estruturas::Dir, utils::{Terminal, TerminalHandler}};
+use crate::{estruturas::{Dir, DoubleStackQueue, LinkedStack, Queue}, utils::{Terminal, TerminalHandler}};
 struct Snake {
-    head: (i32,i32),
     prev_tail: (i32,i32),
-    body: VecDeque<(i32,i32)>,
-    body_set: HashSet<(i32,i32)>,
+    body: DoubleStackQueue<(i32,i32)>,
     dir: Dir,
     prev_dir: Dir
 }
@@ -17,7 +15,7 @@ struct Snake {
 impl Snake {
     pub fn slither(&mut self, size: (i32,i32)) -> bool {
         let off = self.dir.to_xy();
-        let pos = self.head;
+        let pos = self.head();
         let new_pos = (pos.0 + off.0, pos.1 - off.1);
 
         if self.check_collision_self(new_pos) {
@@ -28,16 +26,13 @@ impl Snake {
             return true;
         }
 
-        self.head = new_pos;
-        self.body.push_back(new_pos);
-        self.body_set.insert(new_pos);
+        self.body.enqueue(new_pos);
         self.prev_dir = self.dir;
         return false;
     }
 
     pub fn shrink_tail(&mut self) {
-        self.prev_tail = self.body.pop_front().expect("Chamou shrink_tail sem chamar slither antes");
-        self.body_set.remove(&self.prev_tail);
+        self.prev_tail = self.body.dequeue().expect("Deve chamar shrink_tail só depois de slither");
     }
 
     pub fn check_collision_wall((x,y): (i32,i32), (w,h): (i32,i32)) -> bool {
@@ -49,7 +44,16 @@ impl Snake {
     }
 
     pub fn check_collision_self(&self, pos: (i32,i32)) -> bool {
-        return self.body_set.contains(&pos);
+        for value in self.body.iter() {
+            if *value == pos { 
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn head(&self) -> (i32,i32) {
+        return *self.body.head().expect("Cobra não existe?")
     }
 }
 
@@ -77,10 +81,8 @@ impl SnakeGame {
             score: 0,
             fruit: ((size.0 / 3) as i32, (size.1 / 3) as i32),
             player: Snake {
-                head: snake_pos,
                 prev_tail: (snake_pos.0-1,snake_pos.1),
-                body: VecDeque::from([snake_pos]),
-                body_set: HashSet::from([snake_pos]),
+                body: DoubleStackQueue::from([snake_pos]),
                 dir: Dir::Right,
                 prev_dir: Dir::Right
             }
@@ -111,7 +113,7 @@ impl SnakeGame {
             return GameState::End; // FIM DO JOGO, colidiu
         }
 
-        if self.player.head == self.fruit {
+        if self.player.head() == self.fruit {
             self.score += 1;            
             self.fruit = if let Some(pos) = self.gen_fruit_pos() { pos } else {
                 return GameState::End; // FIM DO JOGO, NÃO CONSEGUIU GERAR FRUTA, A COBRA COBRIU O MAPA INTEIRO
@@ -148,7 +150,7 @@ impl TerminalHandler for SnakeGame {
         }
         
         let fruit_pos = self.fruit;
-        let head_pos = self.player.head;
+        let head_pos = self.player.head();
         let prev_tail_pos = self.player.prev_tail;
 
         // Barra inferior de informações

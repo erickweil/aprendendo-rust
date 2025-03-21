@@ -11,17 +11,21 @@ pub trait Stack<T> {
      * Insere vários elementos no topo da pilha
      * Obs: para [A,B,C] irá fazer push(A), push(B), push(C)
      */
-    fn push_values<const N: usize>(&mut self, values: [T; N]);
+    fn push_values<const N: usize>(&mut self, values: [T; N]) {
+        for value in values.into_iter() {
+            self.push(value);
+        }
+    }
 
     /**
      * Remove um elemento do topo da pilha 
      */
-    fn pop(&mut self) -> T;
+    fn pop(&mut self) -> Option<T>;
 
     /**
-     * Obtêm o valor do topo da pilha sem de fato tirar 
+     * 'Empresta' o valor do topo da pilha. não irá remover
      */
-    fn peek(&self) -> &T;
+    fn peek(&self) -> Option<&T>;
 
     /**
      * Obtêm o tamanho da pilha
@@ -66,7 +70,7 @@ impl<T> LinkedStack<T> {
         Box::new(LinkNode { value: value, next: next })
     }
 
-    pub fn _iter(&self) -> LinkedListIterator<T> {
+    pub fn iter(&self) -> LinkedListIterator<T> {
         LinkedListIterator { 
             atual: self.first.as_ref()
         }
@@ -75,6 +79,8 @@ impl<T> LinkedStack<T> {
 
 impl<T> Stack<T> for LinkedStack<T> {
     fn push(&mut self, value: T) {
+        // Necessário usar Option.take() para obter o valor ao mesmo tempo que transforma ele em None
+        // Isso é para o valor em nenhum instante ter dois donos, e evitar fazer uma nova cópia
         self.first = Some(LinkedStack::node(
             value, 
             self.first.take()
@@ -82,33 +88,21 @@ impl<T> Stack<T> for LinkedStack<T> {
         self.length += 1;
     }
 
-    fn push_values<const N: usize>(&mut self, values: [T; N]) {
-        for value in values.into_iter() {
-            self.push(value);
-        }
-    }
-
-    fn pop(&mut self) -> T {
+    fn pop(&mut self) -> Option<T> {
         match self.first.take() {
             Some(first) => {
                 self.first = first.next;
                 self.length -= 1;
-                return first.value;
+                return Some(first.value);
             },
-            None => {
-                panic!("lista vazia!");
-            },
+            None => { return None },
         }
     }
 
-    fn peek(&self) -> &T {
+    fn peek(&self) -> Option<&T> {
         match &self.first {
-            Some(first) => {
-                return &first.value;
-            },
-            None => {
-                panic!("lista vazia!");
-            },
+            Some(first) => { return Some(&first.value); },
+            None => { return None },
         }
     }
 
@@ -162,25 +156,31 @@ mod test {
     use super::LinkedStack;
     use super::Stack;
 
+    pub fn run_stack_tests<T: Stack<char>>(stack: &mut T) {
+        assert_eq!(stack.peek(), None);
+
+        stack.push_values(['A','B','C']);
+        stack.push('D');
+        stack.push('E');
+
+        assert_eq!(stack.len(), 5);
+        assert_eq!(stack.peek(), Some(&'E'));
+
+        assert_eq!(stack.pop(), Some('E'));
+        assert_eq!(stack.pop(), Some('D'));
+        stack.push('F');
+        assert_eq!(stack.pop(), Some('F'));
+        assert_eq!(stack.pop(), Some('C'));
+        assert_eq!(stack.pop(), Some('B'));
+        assert_eq!(stack.pop(), Some('A'));
+        assert_eq!(stack.pop(), None);
+
+        assert_eq!(stack.len(), 0);
+    }
+
     #[test]
     pub fn linked_stack() {
-        let mut stack = LinkedStack::from(["A","B","C"]);
-        stack.push("D");
-        stack.push("E");
-
-        println!("Pilha:");
-        assert_eq!(stack.len(), 5);
-        assert_eq!(stack.peek(), &"E");
-        println!("{:?}",stack);
-
-        assert_eq!(stack.pop(), "E");
-        assert_eq!(stack.pop(), "D");
-        assert_eq!(stack.pop(), "C");
-        assert_eq!(stack.pop(), "B");
-        assert_eq!(stack.pop(), "A");
-
-        println!("Pilha depois do pop:");
-        assert_eq!(stack.len(), 0);
-        println!("{:?}",stack);
+        let mut stack = LinkedStack::from([]);
+        run_stack_tests(&mut stack);
     }
 }

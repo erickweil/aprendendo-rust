@@ -20,6 +20,7 @@ fn main() {
             println!("- fib");
             println!("- memoria");
             println!("- hilbert");
+            println!("- life");
             println!("- snake");
             
             escolha = leia("").to_lowercase();
