@@ -23,7 +23,7 @@ impl<T> Vec2D<T> where T: Clone {
     }
 
     pub fn positions(&self) -> Iterator2D {
-        return Iterator2D { width: self.width, height: self.height, pos: (0,0) };
+        return Iterator2D::xy((self.width, self.height));
     }
 
     pub fn _clear(&mut self, value: T) {
@@ -63,7 +63,7 @@ pub struct Iterator2D {
 }
 
 impl Iterator2D {
-    pub fn _xy((width, height): (usize, usize)) -> Iterator2D {
+    pub fn xy((width, height): (usize, usize)) -> Iterator2D {
         return Iterator2D { width: width, height: height, pos: (0,0) };
     }
 }

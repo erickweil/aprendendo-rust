@@ -71,7 +71,7 @@ impl<T> LinkedStack<T> {
         }
     }
 
-    fn len(&self) -> i32 {
+    pub fn len(&self) -> i32 {
         self.length
     }
 }
