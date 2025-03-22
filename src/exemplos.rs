@@ -12,3 +12,6 @@ pub use life::*;
 
 mod snake;
 pub use snake::*;
+
+mod minesweeper;
+pub use minesweeper::*;

@@ -74,12 +74,12 @@ struct SnakeGame {
 
 impl SnakeGame {
     pub fn new(size: (i32,i32)) -> SnakeGame {
-        let snake_pos = (1, (size.1 / 2) as i32);
+        let snake_pos = (1, size.1 / 2);
         SnakeGame {
             size: size,
             state: GameState::Running,
             score: 0,
-            fruit: ((size.0 / 3) as i32, (size.1 / 3) as i32),
+            fruit: (size.0 / 3, size.1 / 3),
             player: Snake {
                 prev_tail: (snake_pos.0-1,snake_pos.1),
                 body: LinkedList::from([snake_pos]),

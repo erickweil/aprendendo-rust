@@ -22,6 +22,7 @@ fn main() {
             println!("- hilbert");
             println!("- life");
             println!("- snake");
+            println!("- minesweeper");
             
             escolha = leia("").to_lowercase();
         }
@@ -42,6 +43,8 @@ fn main() {
                 exemplos::life();
             } else if escolha == "snake" {
                 exemplos::snake();
+            } else if escolha == "minesweeper" {
+                exemplos::mine_sweeper();
             } else {
                 println!("Nenhum programa com este nome '{}'", escolha);
             }

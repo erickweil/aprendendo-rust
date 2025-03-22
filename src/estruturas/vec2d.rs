@@ -30,6 +30,10 @@ impl<T> Vec2D<T> where T: Clone {
         self.data.clear();
         self.data.resize(self.width * self.height, value);
     }
+
+    pub fn size(&self) -> (usize,usize) {
+        return (self.width, self.height);
+    }
 }
 
 // let value = vec2d[(x, y)];
