@@ -4,10 +4,10 @@ use rand::Rng;
 
 use crossterm::{cursor::MoveTo, event::KeyCode, style::{Color, Print, SetBackgroundColor, SetForegroundColor}, terminal::{size, DisableLineWrap, EnableLineWrap}, ExecutableCommand, QueueableCommand};
 
-use crate::{estruturas::{Dir, DoubleStackQueue, LinkedStack, Queue}, utils::{Terminal, TerminalHandler}};
+use crate::{estruturas::{Dir, LinkedList, Queue}, utils::{Terminal, TerminalHandler}};
 struct Snake {
     prev_tail: (i32,i32),
-    body: DoubleStackQueue<(i32,i32)>,
+    body: LinkedList<(i32,i32)>,
     dir: Dir,
     prev_dir: Dir
 }
@@ -82,7 +82,7 @@ impl SnakeGame {
             fruit: ((size.0 / 3) as i32, (size.1 / 3) as i32),
             player: Snake {
                 prev_tail: (snake_pos.0-1,snake_pos.1),
-                body: DoubleStackQueue::from([snake_pos]),
+                body: LinkedList::from([snake_pos]),
                 dir: Dir::Right,
                 prev_dir: Dir::Right
             }

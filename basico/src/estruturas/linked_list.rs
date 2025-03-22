@@ -1,7 +1,7 @@
 use super::{Queue, Stack, VecPool, NULL_INDEX};
 
 /**
- * Lista duplamente encadeada sem o uso de ponteiros (isso mesmo nada de Box ou Rc)
+ * Lista duplamente encadeada (Safe) sem o uso de ponteiros (isso mesmo nada de Box, Rc, Cell, unsafe, ...)
  * 
  * Funcionamento:
  * - IndexNode contém um Option<T>, índice do anterior e índice do próximo. (Ou NULL)
@@ -31,25 +31,33 @@ use super::{Queue, Stack, VecPool, NULL_INDEX};
  * When deallocating, update the next index of the deallocating node as firstEmptyIndex, then do firstEmptyIndex = deallocating node index.
  * In this way you create yourself a shortcut for allocating free nodes from the array.
  */
-pub struct LinkedList {
-    arr: VecPool<LinkedNode>,
-    first: i32,
-    last: i32
+pub struct LinkedList<T> {
+    arr: VecPool<LinkedNode<T>>,
+    first: usize,
+    last: usize
 }
 
-pub struct LinkedNode {
-    value: char,
-    next: i32,
-    prev: i32
+pub struct LinkedNode<T> {
+    value: T,
+    next: usize,
+    prev: usize
 }
 
-impl LinkedList {
-    pub fn new() -> LinkedList {
+impl<T> LinkedList<T> {
+    pub fn new() -> LinkedList<T> {
         LinkedList { 
             arr: VecPool::new(),
             first: NULL_INDEX,
             last: NULL_INDEX
         }
+    }
+
+    pub fn from<const N: usize>(values: [T; N]) -> LinkedList<T> {
+        let mut ret = LinkedList::new();
+        for value in values.into_iter() {
+            ret.add_last(value);
+        }
+        return ret;
     }
 
     pub fn clear(&mut self) {
@@ -58,11 +66,11 @@ impl LinkedList {
         self.last = NULL_INDEX;
     }
 
-    fn len(&self) -> i32 {
+    pub fn len(&self) -> usize {
         self.arr.len()
     }
 
-    pub fn add_first(&mut self, value: char) {
+    pub fn add_first(&mut self, value: T) -> usize {
         // Cria o novo nó no array e obtêm o índice dele
         let len = self.arr.len();
         let new_node = self.arr.alloc_node(LinkedNode { value: value, next: NULL_INDEX, prev: NULL_INDEX });
@@ -78,9 +86,11 @@ impl LinkedList {
             // 3 - Agora o início da lista é o novo nó
             self.first = new_node;
         }
+
+        return new_node;
     }
 
-    pub fn add_last(&mut self, value: char) {
+    pub fn add_last(&mut self, value: T) -> usize {
         // Cria o novo nó no array e obtêm o índice dele
         let len = self.arr.len();
         let new_node = self.arr.alloc_node(LinkedNode { value: value, next: NULL_INDEX, prev: NULL_INDEX });
@@ -96,14 +106,16 @@ impl LinkedList {
             // 3 - Agora o final da lista é o novo nó
             self.last = new_node;
         }
+
+        return new_node;
     }
 
-    pub fn remove_first(&mut self) -> Option<char> {
+    pub fn remove_first(&mut self) -> Option<T> {
         if self.first == NULL_INDEX { return None; }
     
         // MOVE o valor do primeiro nó, deixando None no lugar
         let len = self.arr.len();
-        let first_node = self.arr.free_node(self.first);
+        let first_node = self.arr.free_node(self.first).unwrap();
         if len == 1 {
             // Se era o último nó, limpa a lista
             self.clear();
@@ -118,12 +130,12 @@ impl LinkedList {
         return Some(first_node.value);
     }
 
-    pub fn remove_last(&mut self) -> Option<char> {
+    pub fn remove_last(&mut self) -> Option<T> {
         if self.last == NULL_INDEX { return None; }
     
         // MOVE o valor do último nó, deixando None no lugar
         let len = self.arr.len();
-        let last_node = self.arr.free_node(self.last);
+        let last_node = self.arr.free_node(self.last).unwrap();
         if len == 1 {
             // Se era o último nó, limpa a lista
             self.clear();
@@ -138,72 +150,111 @@ impl LinkedList {
         return Some(last_node.value);
     }
 
-    pub fn peek_first(&self) -> Option<&char> {
-        if self.first == NULL_INDEX { return None; }
-
-        return Some(&self.arr.get_node(self.first).unwrap().value);
+    pub fn index_first(&self) -> usize {
+        self.first
     }
 
-    pub fn peek_last(&self) -> Option<&char> {
-        if self.last == NULL_INDEX { return None; }
+    pub fn index_last(&self) -> usize {
+        self.last
+    }
 
-        return Some(&self.arr.get_node(self.last).unwrap().value);
+    /**
+     * Obtêm referência imutável (deve informar o índice retornado pelo método add, NÃO é a posição na lista)
+     */
+    pub fn get(&self, node: usize) -> Option<&T> {
+        return match self.arr.get_node(node) {
+            Some(link_node) => Some(&link_node.value),
+            None => None,
+        }
+    }
+
+    /**
+     * Obtêm referência mutável (deve informar o índice retornado pelo método add, NÃO é a posição na lista)
+     */
+    pub fn get_mut(&mut self, node: usize) -> Option<&mut T> {
+        return match self.arr.get_mut_node(node) {
+            Some(link_node) => Some(&mut link_node.value),
+            None => None,
+        }
+    }
+
+    pub fn iter(&self) -> LinkedListIter<T> {
+        LinkedListIter { 
+            pool: &self.arr,
+            atual: self.arr.get_node(self.first)
+        }
     }
 }
 
-impl Stack<char> for LinkedList {
-    fn push(&mut self, value: char) { self.add_first(value); }
-    fn pop(&mut self) -> Option<char> { return self.remove_first(); }
-    fn peek(&self) -> Option<&char> { return self.peek_first(); }
+impl<T> Stack<T> for LinkedList<T> {
+    fn push(&mut self, value: T) { self.add_first(value); }
+    fn pop(&mut self) -> Option<T> { return self.remove_first(); }
+    fn peek(&self) -> Option<&T> { return self.get(self.first); }
 }
 
-impl Queue<char> for LinkedList {
-    fn enqueue(&mut self, value: char) { self.add_last(value); }
-    fn dequeue(&mut self) -> Option<char> { return self.remove_first(); }
-    fn head(&self) -> Option<&char> { return self.peek_first(); }
-    fn tail(&self) -> Option<&char> { return self.peek_last(); }
+impl<T> Queue<T> for LinkedList<T> {
+    fn enqueue(&mut self, value: T) { self.add_last(value); }
+    fn dequeue(&mut self) -> Option<T> { return self.remove_first(); }
+    fn head(&self) -> Option<&T> { return self.get(self.first); }
+    fn tail(&self) -> Option<&T> { return self.get(self.last); }
 }
 
+// 'a lifetime, atual deve viver tanto quanto a instância da struct
+pub struct LinkedListIter<'a,T> {
+    pool: &'a VecPool<LinkedNode<T>>,
+    atual: Option<&'a LinkedNode<T>>
+}
+
+impl<'a,T> Iterator for LinkedListIter<'a,T> {
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(atual) = self.atual {
+            let ret: Option<&T> = Some(&atual.value);
+
+            self.atual = self.pool.get_node(atual.next);
+            ret
+        } else {
+            None
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {
     use crate::estruturas::{linked_list::*, run_queue_tests, run_stack_tests};
 
-
     #[test]
-    pub fn arr_alloc_logic() {
+    pub fn list_methods() {
         let mut list = LinkedList::new();
-        list.add_last('0');
+        let n0 = list.add_last('0');
         for i in 0..10 {
-            list.add_last('A');
+            let na = list.add_last('A');
             list.add_last('B');
             list.add_last('C');
-            list.add_first('A');
-            list.add_first('B');
-            list.add_first('C');
+            list.add_first('a');
+            let nb = list.add_first('b');
+            list.add_first('c');
             assert_eq!(list.len(), 7);
             
+            assert_eq!(list.get(na), Some(&'A'));
+            assert_eq!(list.get(nb), Some(&'b'));
+
             assert_eq!(list.remove_last(), Some('C'));
             assert_eq!(list.remove_last(), Some('B'));
             assert_eq!(list.remove_last(), Some('A'));
-            assert_eq!(list.remove_first(), Some('C'));
-            assert_eq!(list.remove_first(), Some('B'));
-            assert_eq!(list.remove_first(), Some('A'));            
+            assert_eq!(list.remove_first(), Some('c'));
+            assert_eq!(list.remove_first(), Some('b'));
+            assert_eq!(list.remove_first(), Some('a'));
 
             assert_eq!(list.len(), 1);
         }
-        
+
         assert_eq!(list.len(), 1);
-        assert_eq!(list.peek_first(), Some(&'0'));
+        assert_eq!(list.get(list.index_first()), Some(&'0'));
+        assert_eq!(list.get(n0), Some(&'0'));
 
-        // Como houve momentos que a lista teve até 7 elementos, esse deve ser o tamanho do array
-        //assert_eq!(list.arr.len(), 7);
-        //assert_eq!(list.arr.last_empty, 1);
-
-        // Inserir um novo elemento não deve aumentar o array e sim aproveitar os espaços
         list.add_last('D');
         assert_eq!(list.len(), 2);
-        //assert_eq!(list.arr.last_empty, 2);
     }
 
     #[test]
@@ -211,7 +262,6 @@ mod test {
         let mut queue = LinkedList::new();
         run_queue_tests(&mut queue);
 
-        //assert_eq!(queue.last_empty, NULL_INDEX);
         assert_eq!(queue.arr.len(), 0);
     }
 
@@ -220,7 +270,18 @@ mod test {
         let mut stack = LinkedList::new();
         run_stack_tests(&mut stack);
 
-        //assert_eq!(stack.last_empty, NULL_INDEX);
         assert_eq!(stack.arr.len(), 0);
+    }
+
+    #[test]
+    pub fn linked_list_iter() {
+        let arr = ['A','B','C','D','E'];
+        let mut queue = LinkedList::from(arr);
+        
+        let mut counter = 0;
+        for value in queue.iter() {
+            assert_eq!(value, &arr[counter]);
+            counter += 1;
+        }
     }
 }

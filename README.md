@@ -2,9 +2,10 @@
 - https://app.codecrafters.io/collections/rust-primer	
 - https://app.codecrafters.io/tracks/rust	
 
-**Livro**
+**Livros**
 - https://rust-book.cs.brown.edu/ - The Rust Programming Language (Experiment, interactive)
 - https://rust-unofficial.github.io/too-many-lists/ Learn Rust With Entirely Too Many Linked Lists (Linked List in rust Overview)
+- https://practice.course.rs/why-exercise.html Rust By Practice (Practice Rust with challenging examples, exercises and projects)
 
 **Youtube**
 - **Tech With Tim** https://www.youtube.com/watch?v=T_KrYLW4jw8 (Série de vídeos descontinuada)
@@ -177,3 +178,14 @@ fn main() {
 
 # Memória, Ownership e Borrow Checker
 
+# Ideias, Trabalho futuro
+
+- Jogo da forca – Adivinhe letras de uma palavra oculta antes de ficar sem tentativas.
+- Jogo do dinossauro – Um jogo de rolagem lateral onde você evita obstáculos pressionando uma tecla.
+- Text-based Adventure – Um jogo baseado em escolhas, com descrições em texto e caminhos alternativos.
+- Jogo da memória – Lembre-se e recorde sequências de números ou palavras.
+- Campo minado – Revele áreas seguras enquanto evita minas.
+- 2048 – Una números digitando comandos de movimento (WASD).
+- Sudoku Solver – Implemente uma versão em texto do Sudoku com um modo solucionador.
+- Rogue like, Dungeon Crawler – Navegue por um labirinto enquanto encontra monstros e tesouros.
+- Xadrez/Damas – Jogo simples 1v1 onde os jogadores inserem movimentos em notação algébrica.
