@@ -4,7 +4,7 @@ use rand::Rng;
 
 use crossterm::{cursor::*, event::*, queue, style::*, terminal::{self, Clear, ClearType}, ExecutableCommand, QueueableCommand};
 
-use crate::{estruturas::{Dir, Iterator2D, LinkedStack, Stack, Vec2D}, utils::{Terminal, TerminalHandler}};
+use crate::{estruturas::{Dir, GraphTraversal, GraphTraversalIter, Iterator2D, LinkedStack, Stack, Vec2D}, utils::{Terminal, TerminalHandler}};
 
 #[derive(Clone)]
 enum GradeCell {
@@ -42,6 +42,39 @@ struct MineSweeperGame {
     grade_dirty: Option<HashSet<(usize,usize)>>,
     n_minas: i32,
     state: GameState
+}
+
+impl GraphTraversal<(usize,usize)> for MineSweeperGame {    
+    fn visit<'a>(&mut self, (gx,gy): (usize,usize), neighbors: &'a mut Vec<(usize,usize)>) -> &'a mut Vec<(usize,usize)> {
+        let (w,h) = self.grade.size();
+        if let GradeCell::Empty { minas, explorado } = &mut self.grade[(gx,gy)] {
+            // explorar ele próprio
+            if !*explorado {
+                *explorado = true;
+
+                Self::set_dirty(&mut self.grade_dirty, (gx,gy));
+
+                // Se estiver marcado, remove marcação, pois não é mina
+                self.marcacoes.remove(&(gx,gy));
+
+                if *minas == 0 { // Só possui vizinhos se for 0
+                    let (w,h) = (w as i32, h as i32);
+                    let (gx, gy) = (gx as i32, gy as i32);
+                    [
+                        (gx-1, gy-1), (gx  ,gy-1), (gx+1, gy-1),
+                        (gx-1, gy  ),              (gx+1, gy  ),
+                        (gx-1, gy+1), (gx  ,gy+1), (gx+1, gy+1)
+                    ].into_iter().for_each(|(x,y)| {
+                        if x >= 0 && y >= 0 && x < w && y < h {
+                            neighbors.push((x as usize, y as usize));
+                        }
+                    });
+                }
+            }
+        }
+
+        return neighbors;
+    }
 }
 
 impl MineSweeperGame {
@@ -119,44 +152,10 @@ impl MineSweeperGame {
         }
     }
 
-    fn expandir_explorados(&mut self, (gx,gy): (i32,i32)) {
-        let (w,h) = self.grade.size();
-        if gx < 0 || gy < 0 || gx >= w as i32 || gy >= h as i32 {
-            return;
-        }
-
-        let grade_pos = (gx as usize,gy as usize);
-        if let GradeCell::Empty { minas, explorado } = &mut self.grade[grade_pos] {
-            // explorar ele próprio
-            if !*explorado {
-                *explorado = true;
-                Self::set_dirty(&mut self.grade_dirty, grade_pos);
-
-                // Se estiver marcado, remove marcação, pois não é mina
-                self.marcacoes.remove(&grade_pos);
-
-                // tentar explorar os vizinhos, só se é 0
-                // Flood fill, DFS (Depth first search)
-                if *minas == 0 {
-                    self.expandir_explorados((gx-1,gy-1));
-                    self.expandir_explorados((gx-1,gy  ));
-                    self.expandir_explorados((gx-1,gy+1));
-
-                    self.expandir_explorados((gx  ,gy-1));
-                    self.expandir_explorados((gx  ,gy+1));
-
-                    self.expandir_explorados((gx+1,gy-1));
-                    self.expandir_explorados((gx+1,gy  ));
-                    self.expandir_explorados((gx+1,gy+1));
-                }
-            }
-        }
-    }
-
     fn explorar(&mut self, (gx,gy): (usize,usize)) {
         match &mut self.grade[(gx,gy)] {
             GradeCell::Empty { minas, explorado } => {
-                self.expandir_explorados((gx as i32, gy as i32));
+                GraphTraversalIter::breadth_first(self, (gx, gy));
 
                 if self.verificar_ganhou() {
                     self.state = GameState::Win;

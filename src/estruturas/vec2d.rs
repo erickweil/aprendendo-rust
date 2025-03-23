@@ -3,6 +3,7 @@ use std::{ops::{Index, IndexMut}, slice::Iter};
 /**
  * Facilita utilizar um Vec<> como se fosse 2D, utilizando cálculo de índice a partir das posições x e y
  */
+#[derive(Clone)]
 pub struct Vec2D<T> {
     width: usize,  
     height: usize, 

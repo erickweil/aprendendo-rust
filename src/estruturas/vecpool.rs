@@ -1,11 +1,11 @@
-use std::mem;
+use std::{mem, ops::{Index, IndexMut}};
 
 use rand::distr::slice::Empty;
 
 // valor de índice que será utilizado para representar a ausência de conexão
 pub const NULL_INDEX: usize = usize::MAX;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum IndexNode<T> {
     Filled(T),
     Empty(usize)
@@ -42,6 +42,14 @@ impl<T> IndexNode<T> {
  * - Armazena o índice do último valor vazio (topo da pilha), ou NULL se não tem
  * - Cada valor vazio contém o next do próximo valor vazio, ou NULL
  * - Ao criar novo nó é realizado 'push' nesta pilha ligada, e ao remover é feito 'pop'
+ * 
+ * Referências/Trabalho similar:
+ * - Slotmap (https://github.com/orlp/slotmap)
+ *   - https://www.reddit.com/r/rust/comments/8zkedd/slotmap_a_new_crate_for_storing_values_with/
+ *   - 4 minute version presented as a lightning talk at C++Now: https://www.youtube.com/watch?v=SHaAR7XPtNU
+ *   - 30 minute version (includes other containers as well) presented as a CppCon session: https://www.youtube.com/watch?v=-8UZhDjgeZU
+ * - Slab (https://github.com/tokio-rs/slab)
+ * - https://www.reddit.com/r/rust/comments/gfo1uw/benchmarking_slotmap_slab_stable_vec_etc/
  */
 pub struct VecPool<T> {
     arr: Vec<IndexNode<T>>,
@@ -73,20 +81,20 @@ impl<T> VecPool<T> {
         } else {
             // fazer pop() da pilha de valores vazios
             // 1 - obter índice do espaço vazio
-            let free_node = self.last_empty;
+            let free_node_index = self.last_empty;
 
-            // 2 - topo da pilha deve apontar para o próximo espaço vazio (ou NULL)
-            if let IndexNode::Empty(next) = self.arr[self.last_empty] {
+            let free_node = &mut self.arr[free_node_index];
+            if let &mut IndexNode::Empty(next) = free_node {
                 self.last_empty = next;
+
+                // Re-Inicializar os valores
+                *free_node = node;
+                self.length += 1;
+
+                return free_node_index;
             } else {
                 panic!("NUNCA DEVERIA OCORRER: Ao obter o last_empty obteve um Filled");
             }
-
-            // Re-Inicializar os valores
-            self.arr[free_node] = node;
-            self.length += 1;
-
-            return free_node;
         }
     }
 
@@ -98,31 +106,15 @@ impl<T> VecPool<T> {
         if let Some(arr_node) = self.arr.get_mut(node) {
             if let IndexNode::Empty(_) = arr_node {
                 return None; // free em nó Empty (double free?)
-            }
-            
-            let ret_value: Option<T>;
-            if node != len - 1 {
-                // Se removeu e não é no fim do array, marca como vazio
-                // - fazer push() na pilha de valores vazios
-                let ret = mem::replace(arr_node, IndexNode::Empty(self.last_empty));
-                self.last_empty = node;
-                self.length -= 1;
+            }            
 
-                ret_value = ret.get_owned();
-            } else {
-                // Removendo do fim do array, basta fazer pop
-                let ret = self.arr.pop().unwrap();
-                self.length -= 1;
+            // Se removeu e não é no fim do array, marca como vazio
+            // - fazer push() na pilha de valores vazios
+            let ret = mem::replace(arr_node, IndexNode::Empty(self.last_empty));
+            self.last_empty = node;
+            self.length -= 1;
 
-                ret_value = ret.get_owned();
-            }
-
-            if(self.length == 0) {
-                // Se ficou vazio, limpar os empty
-                self.clear();
-            }
-
-            ret_value
+            ret.get_owned()
         } else {
             None // free em índice fora do array
         }
@@ -153,10 +145,43 @@ impl<T> VecPool<T> {
     }
 }
 
+
+// let value = pool[index];
+impl<T> Index<usize> for VecPool<T> {
+    type Output = T;
+
+    fn index(&self, node: usize) -> &Self::Output {
+        match &self.arr[node] {
+            IndexNode::Filled(value) => value,
+            IndexNode::Empty(_) => panic!("Acessou um Empty {:?}", node),
+        }
+    }
+}
+
+// pool[index] = value;
+impl<T> IndexMut<usize> for VecPool<T> {
+    fn index_mut(&mut self, node: usize) -> &mut Self::Output {
+        match &mut self.arr[node] {
+            IndexNode::Filled(value) => value,
+            IndexNode::Empty(_) => panic!("Acessou um Empty {:?}", node),            
+        }
+    }
+}
+
+impl<T: Clone> Clone for VecPool<T> {
+    fn clone(&self) -> Self {
+        VecPool { 
+            arr: self.arr.clone(), 
+            length: self.length, 
+            last_empty: self.last_empty 
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::VecPool;
-
+    use std::fmt::Write;
 
     #[test]
     pub fn arr_alloc_logic() {
@@ -181,31 +206,37 @@ mod test {
 
             assert_eq!(pool.free_node(c), Some('C'));
             assert_eq!(pool.free_node(b), Some('B'));
-            // Se alocar B,C e liberar C,B irá fazer pop() array diminiu
+            // tamanho do pool diminui mas do array não
             assert_eq!(pool.len(), 1);
-            assert_eq!(pool.arr.len(), 1);
+            assert_eq!(pool.arr.len(), 3);
 
             assert_eq!(pool.get_node(b), None);
             assert_eq!(pool.get_node(c), None);
         }
-        for i in 0..5 {
-            let d = pool.alloc_node('D');
-            let e = pool.alloc_node('E');
-            assert_eq!(pool.len(), 3);
-            assert_eq!(pool.arr.len(), 3);
-
-            assert_eq!(pool.free_node(d), Some('D'));
-            assert_eq!(pool.free_node(e), Some('E'));
-            // Se alocar D,E e liberar D,E irá fazer pop() só para E, então array não diminiu
-            assert_eq!(pool.len(), 1);
-            assert_eq!(pool.arr.len(), 2);
-        }
         assert_eq!(pool.free_node(a), Some('A'));
         assert_eq!(pool.len(), 0);
-        assert_eq!(pool.arr.len(), 0); // 0 porque fez clear ao remover o último
+        assert_eq!(pool.arr.len(), 3);
         assert_eq!(pool.get_node(a), None);
 
         assert_eq!(pool.free_node(a), None);
         assert_eq!(pool.get_node(a), None);
+
+        pool.clear();
+        assert_eq!(pool.arr.len(), 0);  // 0 porque fez clear ao remover o último
+    }
+
+
+    #[test]
+    pub fn index_operator() {
+        let mut pool: VecPool<&str> = VecPool::new();
+
+        let nome = pool.alloc_node("João");
+        let sobrenome = pool.alloc_node("");
+        
+        pool[sobrenome] = "Silva";
+
+        let mut f = String::new();
+        write!(f,"{} {}", pool[nome], pool[sobrenome]);
+        assert_eq!(f, "João Silva");
     }
 }

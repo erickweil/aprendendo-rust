@@ -37,7 +37,7 @@ pub struct LinkedList<T> {
     last: usize
 }
 
-pub struct LinkedNode<T> {
+struct LinkedNode<T> {
     value: T,
     next: usize,
     prev: usize
@@ -80,9 +80,9 @@ impl<T> LinkedList<T> {
             self.last = new_node; 
         } else {
             // 1 - .next do novo nó deve apontar para o antigo início da lista
-            self.arr.get_mut_node(new_node).unwrap().next = self.first;
+            self.arr[new_node].next = self.first;
             // 2 - .prev do antigo início deve apontar para o novo nó
-            self.arr.get_mut_node(self.first).unwrap().prev = new_node;
+            self.arr[self.first].prev = new_node;
             // 3 - Agora o início da lista é o novo nó
             self.first = new_node;
         }
@@ -100,9 +100,9 @@ impl<T> LinkedList<T> {
             self.last = new_node; 
         } else {
             // 1 - .prev do novo nó deve apontar para o antigo final da lista
-            self.arr.get_mut_node(new_node).unwrap().prev = self.last;
+            self.arr[new_node].prev = self.last;
             // 2 - .next do antigo final deve apontar para o novo nó
-            self.arr.get_mut_node(self.last).unwrap().next = new_node;
+            self.arr[self.last].next = new_node;
             // 3 - Agora o final da lista é o novo nó
             self.last = new_node;
         }
@@ -122,7 +122,7 @@ impl<T> LinkedList<T> {
         } else {
             // 1 - .prev do próximo nó deve apontar para NULL agora
             let next_index = first_node.next;
-            self.arr.get_mut_node(next_index).unwrap().prev = NULL_INDEX;
+            self.arr[next_index].prev = NULL_INDEX;
             // 2 - first é o próximo do primeiro agora
             self.first = next_index;
         }
@@ -142,7 +142,7 @@ impl<T> LinkedList<T> {
         } else {
             // 1 - .next do nó anterior ao último deve apontar para NULL agora
             let prev_index = last_node.prev;
-            self.arr.get_mut_node(prev_index).unwrap().next = NULL_INDEX;
+            self.arr[prev_index].next = NULL_INDEX;
             // 2 - last é o anterior ao último agora
             self.last = prev_index;
         }
