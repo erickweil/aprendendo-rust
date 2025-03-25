@@ -178,14 +178,34 @@ fn main() {
 
 # Memória, Ownership e Borrow Checker
 
+# Exemplos
+Para executar os exemplos, execute `cargo run <nome>`
+- **hilbert** [Gerador Curva de Hilbert](src/exemplos/hilbert.rs)
+- **life** [Jogo da Vida (Conway Game of Life)](src/exemplos/life.rs)
+- **snake** [Jogo da 'Cobrinha' (Snake Game)](src/exemplos/snake.rs)
+- **minesweeper** [Campo Minado (Minewsweeper)](src/exemplos/minesweeper.rs)
+
 # Ideias, Trabalho futuro
 
+- **Objetivo Final** Gerador de horário
+
+Porém, antes de chegar e fazer algo complexo como um gerador de horário, vamos com outros desafios primeiro, que ajudarão a entender melhor rust:
+
+## Jogos/Simulações/Terminal Interativo
 - Jogo da forca – Adivinhe letras de uma palavra oculta antes de ficar sem tentativas.
 - Jogo do dinossauro – Um jogo de rolagem lateral onde você evita obstáculos pressionando uma tecla.
 - Text-based Adventure – Um jogo baseado em escolhas, com descrições em texto e caminhos alternativos.
 - Jogo da memória – Lembre-se e recorde sequências de números ou palavras.
-- Campo minado – Revele áreas seguras enquanto evita minas.
+- Tetris – Implemente um jogo clássico de Tetris em modo texto, usando caracteres para os blocos e a rotação das peças.
 - 2048 – Una números digitando comandos de movimento (WASD).
 - Sudoku Solver – Implemente uma versão em texto do Sudoku com um modo solucionador.
 - Rogue like, Dungeon Crawler – Navegue por um labirinto enquanto encontra monstros e tesouros.
 - Xadrez/Damas – Jogo simples 1v1 onde os jogadores inserem movimentos em notação algébrica.
+- Simulação de Formigas (Langton's Ant) – Modele um autômato celular baseado em formigas que seguem regras simples para criar padrões emergentes.
+- Gerador de Labirintos – Implemente um algoritmo como Prim ou Recursive Backtracking para criar labirintos aleatórios.
+
+## Algoritmos e Computação
+- Simulador de Máquina de Turing – Crie uma simulação básica de uma Máquina de Turing com regras configuráveis.
+- Algoritmos Genéticos – Resolva um problema simples (como encontrar uma string alvo) usando um algoritmo genético.
+- Solução de Sudoku – Escreva um solver eficiente usando Backtracking ou Constraint Propagation.
+- Verificador de Expressões Matemáticas – Crie um parser que valida e avalia expressões matemáticas com parênteses e operadores.

@@ -15,3 +15,6 @@ pub use snake::*;
 
 mod minesweeper;
 pub use minesweeper::*;
+
+mod expression;
+pub use expression::*;
