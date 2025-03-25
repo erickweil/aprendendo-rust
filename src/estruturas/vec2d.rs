@@ -35,6 +35,19 @@ impl<T> Vec2D<T> where T: Clone {
     pub fn size(&self) -> (usize,usize) {
         return (self.width, self.height);
     }
+
+    pub fn len(&self) -> usize {
+        return self.width * self.height;
+    }
+
+    pub fn get(&self, (x,y): (i32,i32)) -> Option<&T> {
+        let (w,h) = (self.width as i32, self.height as i32);
+        if x < 0 || y < 0 || x >= w || y >= h {
+            return None;
+        }
+
+        return self.data.get((y * w + x) as usize);
+    }
 }
 
 // let value = vec2d[(x, y)];

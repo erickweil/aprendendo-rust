@@ -15,15 +15,6 @@ enum GradeCell {
     Mine
 }
 
-impl GradeCell {
-    fn is_mine_or_unexplored(&self) -> bool {
-        match self {
-            GradeCell::Empty { minas, explorado } => !explorado,
-            GradeCell::Mine => true,
-        }
-    }
-}
-
 #[derive(PartialEq)]
 #[derive(Clone, Copy)]
 enum GameState {
@@ -33,7 +24,6 @@ enum GameState {
 }
 
 struct MineSweeperGame {
-    size: (i32, i32),
     pos: (i32, i32),
     prev_pos: (usize,usize),
     pressed_enter: bool,
@@ -41,6 +31,7 @@ struct MineSweeperGame {
     marcacoes: HashSet<(usize,usize)>,
     grade_dirty: Option<HashSet<(usize,usize)>>,
     n_minas: i32,
+    n_explorados: i32,
     state: GameState
 }
 
@@ -51,6 +42,7 @@ impl GraphTraversal<(usize,usize)> for MineSweeperGame {
             // explorar ele próprio
             if !*explorado {
                 *explorado = true;
+                self.n_explorados += 1;
 
                 Self::set_dirty(&mut self.grade_dirty, (gx,gy));
 
@@ -81,18 +73,16 @@ impl MineSweeperGame {
     fn new (size: (i32, i32)) -> MineSweeperGame {
         let center = (size.0 / 2, size.1 / 2);
         let mut grade = Vec2D::new(size.0 as usize, size.1 as usize, GradeCell::Empty { minas: 0, explorado: false });
-        let n_minas = (size.0 * size.1) / 10;
-        //let n_minas = 4;
-        MineSweeperGame::inicializar_grade(&mut grade, center, n_minas);
+        let n_minas = MineSweeperGame::inicializar_grade(&mut grade, center);
         MineSweeperGame {
-            size: size, 
             pos: center,
             prev_pos: (0,0),
             pressed_enter: false,
             grade: grade,
             marcacoes: HashSet::new(),
             grade_dirty: Some(HashSet::new()),
-            n_minas,
+            n_minas: n_minas,
+            n_explorados: 0,
             state: GameState::Running
         }
     }
@@ -100,37 +90,50 @@ impl MineSweeperGame {
     // =================================================================
     // Métodos da lógica do jogo
     // =================================================================
-    fn is_mine(grade: &mut Vec2D<GradeCell>, (x,y): (i32,i32)) -> bool {
-        let (w,h) = grade.size();
-        if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
-            return false;
-        }
-
-        if let GradeCell::Mine = grade[(x as usize,y as usize)] {
-            return true;
+    fn is_mine(grade: &Vec2D<GradeCell>, (x,y): (i32,i32)) -> bool {
+        if let Some(cell) = grade.get((x,y)) {
+            match cell {
+                GradeCell::Empty { minas, explorado } => false,
+                GradeCell::Mine => true,
+            }
         } else {
-            return false;
+            false
         }
     }
 
-    fn inicializar_grade(grade: &mut Vec2D<GradeCell>, center: (i32, i32), minas: i32) {
-        let mut rng = rand::rng();
-        let size = grade.size();
-        let mut total_minas = 0;
-        while total_minas <= minas {
-            let rdnpos = (
-                rng.random_range(0..size.0),
-                rng.random_range(0..size.1)
-            );
-            if let GradeCell::Mine = grade[rdnpos] { continue; }
+    fn is_mine_or_unexplored(&self, (x,y): (usize,usize)) -> bool {
+        if let Some(cell) = self.grade.get((x as i32,y as i32)) {
+            match cell {
+                GradeCell::Empty { minas, explorado } => !explorado,
+                GradeCell::Mine => true,
+            }
+        } else {
+            true
+        }        
+    }
 
-            grade[rdnpos] =  GradeCell::Mine;
+    fn inicializar_grade(grade: &mut Vec2D<GradeCell>, center: (i32, i32)) -> i32 {
+        let mut rng = rand::rng();
+        let (w,h) = grade.size();
+        let gerar_minas = grade.len() / 20 + 1;
+        let mut total_minas = 0;
+        for _ in 0..gerar_minas {
+            let rdnpos = (
+                rng.random_range(0..w),
+                rng.random_range(0..h)
+            );
+            if let GradeCell::Mine = grade[rdnpos] { 
+                // já tem mina aqui
+                continue; 
+            }
+            if rdnpos.0 >= (center.0-1) as usize && rdnpos.0 <= (center.0+1) as usize
+            && rdnpos.1 >= (center.1-1) as usize && rdnpos.1 <= (center.1+1) as usize {
+                // não perder de primeira
+                continue;
+            }
+
+            grade[rdnpos] = GradeCell::Mine;
             total_minas += 1;
-        }
-        // não perder de primeira
-        for (x,y) in Iterator2D::xy((3, 3)) {
-            let off = (x as i32 - 1, y as i32 - 1);
-            grade[((center.0 + off.0) as usize, (center.1 + off.1) as usize)] = GradeCell::Empty { minas: 0, explorado: false };
         }
 
         for pos in grade.positions() {
@@ -150,6 +153,8 @@ impl MineSweeperGame {
                 grade[pos] = GradeCell::Empty { minas: minas, explorado: false };
             }
         }
+
+        return total_minas;
     }
 
     fn explorar(&mut self, (gx,gy): (usize,usize)) {
@@ -189,46 +194,20 @@ impl MineSweeperGame {
 
     // Se não tem mais nenhum explorado, sobrou só as minas, então ganhou!
     fn verificar_ganhou(&self) -> bool {
-        for cell in self.grade.values() {
-            match cell {
-                GradeCell::Empty { minas, explorado } => {
-                    if *explorado == false { 
-                        return false; 
-                    }
-                },
-                GradeCell::Mine => { },
-            }
-        }
-
-        return true;
+        return self.n_explorados + self.n_minas >= self.grade.len() as i32;
     }
-
 
     // =================================================================
     // Métodos de desenhar no terminal
     // =================================================================
 
-    fn draw_cell_empty(&mut self, t: &mut Stdout, pos: (usize,usize)) -> io::Result<()> {
-        
-        if self.marcacoes.contains(&(pos.0 / 2, pos.1)) {
-            t.queue(SetBackgroundColor(Color::DarkGrey))?
-            .queue(SetForegroundColor(Color::Red))?
-            .queue(Print("⌖"))?;
-        } else {
-            t.queue(SetBackgroundColor(Color::DarkGrey))?
-            .queue(SetForegroundColor(Color::White))?
-            .queue(Print(" "))?;
-        }
-
-        Ok(())
-    }
-
-    fn draw_cell(&mut self, t: &mut Stdout, (x,y): (usize,usize), highlight: bool) -> io::Result<()> {
+    fn draw_cell(&self, t: &mut Stdout, (x,y): (usize,usize), grade_pos: (usize,usize), highlight: bool) -> io::Result<()> {
+        let mut draw_empty = false;
         t.queue(MoveTo(x as u16,y as u16))?;
         if highlight {
             t.queue(SetAttribute(Attribute::Reverse));
         }
-        match self.grade[(x/2,y)] {
+        match self.grade[grade_pos] {
             GradeCell::Empty { minas, explorado } => {
                 if explorado {
                     t.queue(SetBackgroundColor(Color::Black))?;
@@ -248,7 +227,7 @@ impl MineSweeperGame {
                         t.queue(SetForegroundColor(Color::DarkMagenta))?.queue(Print(minas))?;
                     }
                 } else {
-                   self.draw_cell_empty(t, (x,y));
+                   draw_empty = true;
                 }
             },
             GradeCell::Mine => {
@@ -257,9 +236,20 @@ impl MineSweeperGame {
                     .queue(SetBackgroundColor(Color::White))?
                     .queue(Print("¤"))?;
                 } else {
-                    self.draw_cell_empty(t, (x,y));
+                    draw_empty = true;
                 }
             },
+        }
+        if draw_empty {
+            if self.marcacoes.contains(&grade_pos) {
+                t.queue(SetBackgroundColor(Color::DarkGrey))?
+                .queue(SetForegroundColor(Color::Red))?
+                .queue(Print("⌖"))?;
+            } else {
+                t.queue(SetBackgroundColor(Color::DarkGrey))?
+                .queue(SetForegroundColor(Color::White))?
+                .queue(Print(" "))?;
+            }
         }
         if highlight {
             t.queue(SetAttribute(Attribute::NoReverse));
@@ -268,9 +258,10 @@ impl MineSweeperGame {
         Ok(())
     }
 
-    fn draw_in_between(&mut self, t: &mut Stdout, (x,y): (usize,usize)) -> io::Result<()> {
-        let esquerda = self.grade[(x/2,y)].is_mine_or_unexplored();
-        let direita = if ((x/2)+1) < self.grade.size().0 { self.grade[((x/2)+1,y)].is_mine_or_unexplored() } else { true };
+    fn draw_in_between(&self, t: &mut Stdout, (x,y): (usize,usize), (gx,gy): (usize,usize)) -> io::Result<()> {
+        let esquerda = self.is_mine_or_unexplored((gx,   gy));
+        let direita =  self.is_mine_or_unexplored((gx+1, gy));
+
         if !esquerda && !direita {
             t.queue(MoveTo(x as u16,y as u16))?
             .queue(SetForegroundColor(Color::White))?
@@ -295,6 +286,7 @@ impl MineSweeperGame {
 impl TerminalHandler for MineSweeperGame {
     fn on_draw(&mut self, term: &mut Terminal) -> io::Result<()> {
         let t = &mut term.stdout;
+        let (w,h) = self.grade.size();
         
         let p = (self.pos.0 as usize,self.pos.1 as usize);
         if p != self.prev_pos {
@@ -309,14 +301,14 @@ impl TerminalHandler for MineSweeperGame {
         }
 
         // Barra inferior de informações
-        t.queue(MoveTo(0,self.size.1 as u16))?
+        t.queue(MoveTo(0,h as u16))?
         .queue(SetForegroundColor(Color::Black))?
         .queue(SetBackgroundColor(Color::White))?
         .queue(Clear(ClearType::CurrentLine))?;
 
         match self.state {
             GameState::Running => {
-                t.queue(MoveTo(0,self.size.1 as u16))?
+                t.queue(MoveTo(0,h as u16))?
                     .queue(Print("minas:"))?
                     .queue(Print(self.marcacoes.len()))?
                     .queue(Print("/"))?
@@ -328,11 +320,11 @@ impl TerminalHandler for MineSweeperGame {
                     .queue(Print(" marcar "))?;
             },
             GameState::Win => {
-                t.queue(MoveTo(0,self.size.1 as u16))?
+                t.queue(MoveTo(0,h as u16))?
                 .queue(Print("VOCÊ GANHOU!!!!!!!!"))?;
             },
             GameState::Lose => {
-                t.queue(MoveTo(0,self.size.1 as u16))?
+                t.queue(MoveTo(0,h as u16))?
                 .queue(Print("... KABUM"))?;
             },
         }
@@ -350,10 +342,10 @@ impl TerminalHandler for MineSweeperGame {
                 let highlight = self.pos == (gx as i32, gy as i32);
                 
                 if gx > 0 && !dirty.contains(&(gx - 1, gy)) {
-                    self.draw_in_between(t, (gx * 2 - 1, gy))?;
+                    self.draw_in_between(t, (gx * 2 - 1, gy), (gx-1, gy))?;
                 }
-                self.draw_in_between(t, (gx * 2 + 1, gy))?;
-                self.draw_cell(t, (gx * 2 + 0, gy), highlight)?;
+                self.draw_in_between(t, (gx * 2 + 1, gy), (gx, gy))?;
+                self.draw_cell(t, (gx * 2 + 0, gy), (gx, gy), highlight)?;
             }
             dirty.clear();
 
@@ -361,17 +353,6 @@ impl TerminalHandler for MineSweeperGame {
         } else {
             None // Nunca deveria ocorrer
         };
-
-        /*let (w,h) = self.grade.size();
-        for (x,y) in Iterator2D::xy((w * 2, h)) {
-            let (gx, gy) = (x / 2, y);
-            if x % 2 == 0 { // espaço com símbolo
-                self.draw_cell(t, (x,y))?;
-            } else { // espaço vazio
-                self.draw_in_between(t, (x,y))?;
-            }
-        }
-        */
 
         Ok(())
     }
@@ -382,11 +363,12 @@ impl TerminalHandler for MineSweeperGame {
         }
 
         let (x,y) = self.pos;
-        let (w,h) = self.size;
+        let (w,h) = self.grade.size();
+        let (w,h) = (w as i32, h as i32);
         match e.code {
             KeyCode::Char(' ') => {
                 let pos_marcacao = (self.pos.0 as usize, self.pos.1 as usize);
-                if self.grade[pos_marcacao].is_mine_or_unexplored() && !self.marcacoes.contains(&pos_marcacao) {
+                if self.is_mine_or_unexplored(pos_marcacao) && !self.marcacoes.contains(&pos_marcacao) {
                     self.marcacoes.insert(pos_marcacao);
                 } else {
                     self.marcacoes.remove(&pos_marcacao);

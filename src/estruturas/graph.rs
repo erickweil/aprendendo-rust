@@ -1,4 +1,4 @@
-use std::{collections::{HashSet, VecDeque}, hash::Hash, marker::PhantomData};
+use std::{collections::{HashSet, VecDeque}, hash::Hash};
 
 use super::{VecPool, NULL_INDEX};
 
@@ -8,27 +8,29 @@ pub trait GraphTraversal<T> {
      * next é um array vazio que poderá ser preenchido com os próximos vizinhos,
      * Mas também pode retornar outro array se quiser
     */
-    fn visit<'a>(&mut self, node: T, neighbors: &'a mut Vec<T>) -> &'a mut Vec<T> {
-        todo!()
-    }
-
-    fn get_neighbors<'a>(&self, node: T, neighbors: &'a mut Vec<T>) -> &'a mut Vec<T> {
-        todo!()
-    }
+    fn visit<'a>(&mut self, node: T, neighbors: &'a mut Vec<T>) -> &'a mut Vec<T>;
 }
 
 /**
  * Travessia DFS ou BFS, irá chamar o método .visit() para cada nó visitado
  */
-pub struct GraphTraversalIter<'a,T : Copy + Eq + Hash> {
-    graph: &'a mut dyn GraphTraversal<T>,
+pub struct GraphTraversalIter<'a, T, G>
+where
+    T: Copy + Eq + Hash,
+    G: GraphTraversal<T>,
+{
+    graph: &'a mut G,
     visited: HashSet<T>,
     to_explore: VecDeque<T>,
     neighbors_cache: Vec<T>
 }
 
-impl<'a, T : Copy + Eq + Hash> GraphTraversalIter<'a, T> {
-    fn new(graph: &'a mut dyn GraphTraversal<T>, start: T) -> GraphTraversalIter<'a, T> {
+impl <'a, T, G> GraphTraversalIter<'a, T, G> 
+where
+    T: Copy + Eq + Hash,
+    G: GraphTraversal<T> 
+{
+    fn new(graph: &'a mut G, start: T) -> GraphTraversalIter<'a, T, G> {
         let mut to_explore = VecDeque::new();
         to_explore.push_back(start);
 
@@ -40,18 +42,14 @@ impl<'a, T : Copy + Eq + Hash> GraphTraversalIter<'a, T> {
         }
     }
 
-    pub fn depth_first(graph: &'a mut dyn GraphTraversal<T>, start: T) {
+    pub fn depth_first(graph: &'a mut G, start: T) {
         GraphTraversalIter::new(graph, start).traversal(true);
     }
 
-    pub fn breadth_first(graph: &'a mut dyn GraphTraversal<T>, start: T) {
+    pub fn breadth_first(graph: &'a mut G, start: T) {
         GraphTraversalIter::new(graph, start).traversal(false);
     }
-
-    pub fn breadth_first_iter(graph: &'a mut dyn GraphTraversal<T>, start: T) -> Self {
-        GraphTraversalIter::new(graph, start)
-    }
-
+    
     fn traversal(&mut self, depth_first: bool) {
         while let Some(node_index) = if depth_first { self.to_explore.pop_back() } else { self.to_explore.pop_front() } {
             // Insere na lista, e se já esá visitado deve pular este nó
@@ -131,5 +129,81 @@ impl<T> GraphPool<T> {
 impl<T> GraphTraversal<usize> for GraphPool<T> {
     fn visit<'a>(&mut self, node: usize, neighbors: &'a mut Vec<usize>) -> &'a mut Vec<usize> {
         return neighbors;
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+    use std::ops::Index;
+
+    use super::*;
+
+    #[test]
+    pub fn graph_iter() {
+        // Simulando grafo com string
+        struct TestVisit {
+            str: String,
+            received: String
+        }
+
+        impl GraphTraversal<i32> for TestVisit {
+            fn visit<'a>(&mut self, node: i32, neighbors: &'a mut Vec<i32>) -> &'a mut Vec<i32> {
+                // Test
+                let mut chars = self.str.chars();
+                let prev = if node > 0 { chars.nth((node-1) as usize) } else { None };
+                let curr = chars.next();
+                let next = chars.next();
+
+                assert_ne!(curr, None);
+                self.received.push(curr.unwrap());
+
+                // Add neighbors
+                if prev != Some(' ') && prev != None {
+                    neighbors.push(node-1);
+                }
+                if next != Some(' ') && next != None {
+                    neighbors.push(node+1);
+                }
+
+                neighbors
+            }
+        }
+
+        {
+            let mut test = TestVisit { str: String::from("jabuticaba   abc"), received: String::new() };
+            GraphTraversalIter::breadth_first(&mut test, 0);
+            assert_eq!(test.received, String::from("jabuticaba"));
+            
+            test.received = String::new();
+            GraphTraversalIter::breadth_first(&mut test, 9);
+            assert_eq!(test.received, String::from("abacitubaj"));
+
+            test.received = String::new();
+            GraphTraversalIter::breadth_first(&mut test, 11);
+            assert_eq!(test.received, String::from(" "));
+            
+            test.received = String::new();
+            GraphTraversalIter::breadth_first(&mut test, 5);
+            assert_eq!(test.received, String::from("itcuabbaaj"));
+        }
+        {
+            let mut test = TestVisit { str: String::from("jabuticaba   abc"), received: String::new() };
+
+            GraphTraversalIter::depth_first(&mut test, 0);
+            assert_eq!(test.received, String::from("jabuticaba"));
+
+            test.received = String::new();
+            GraphTraversalIter::depth_first(&mut test, 9);
+            assert_eq!(test.received, String::from("abacitubaj"));
+
+            test.received = String::new();
+            GraphTraversalIter::breadth_first(&mut test, 11);
+            assert_eq!(test.received, String::from(" "));
+
+            test.received = String::new();
+            GraphTraversalIter::depth_first(&mut test, 5);
+            assert_eq!(test.received, String::from("icabatubaj"));
+        }
     }
 }
