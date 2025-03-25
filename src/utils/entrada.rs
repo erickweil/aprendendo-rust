@@ -1,7 +1,9 @@
-use std::io;
+use std::io::{self, Write};
 
 pub fn leia(prompt: &str) -> String {
-    println!("{}", prompt);
+    print!("{}", prompt);
+    
+    io::stdout().flush();
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Erro ao ler terminal");

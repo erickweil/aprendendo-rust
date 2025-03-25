@@ -1,4 +1,4 @@
-use std::{fmt::{self, write, Error}, io::Result, num::ParseIntError, result, slice};
+use std::{collections::HashMap, fmt::{self, write, Error}, io::Result, num::ParseIntError, result, slice};
 
 use crate::{estruturas::Dir, utils::leia};
 
@@ -18,6 +18,7 @@ enum ExprToken {
     BitNot,
     BitShiftR,
     BitShiftL,
+    Attrib,
 
     Gt,
     Lt,
@@ -35,7 +36,7 @@ enum ExprToken {
 
 impl ExprToken {
     fn operator_precedence(&self) -> i32 { // larger means higher precedence
-        match self {
+        match &self {
             ExprToken::ParO => 20,
             ExprToken::ParC => 20,
             ExprToken::UnaryPlus => 13,
@@ -51,6 +52,7 @@ impl ExprToken {
             ExprToken::BitAnd => 7,
             ExprToken::BitXor => 6,
             ExprToken::BitOr => 5,
+            ExprToken::Attrib => 1,
             _ => -1
         }
     }
@@ -60,7 +62,7 @@ impl ExprToken {
     }   
 
     fn get_associativity(&self) -> Dir {
-        match self {
+        match &self {
             ExprToken::UnaryPlus => Dir::Right,
             ExprToken::UnaryMinus => Dir::Right,
             ExprToken::BitNot => Dir::Right,
@@ -69,7 +71,7 @@ impl ExprToken {
     }
 
     fn get_number_args(&self) -> i32 {
-        match self {
+        match &self {
             ExprToken::UnaryPlus => 1,
             ExprToken::UnaryMinus => 1,
             ExprToken::BitNot => 1,
@@ -83,12 +85,13 @@ impl ExprToken {
             ExprToken::BitAnd => 2,
             ExprToken::BitXor => 2,
             ExprToken::BitOr => 2,
+            ExprToken::Attrib => 2,
             _ => 0         
         }
     }
 
     fn is_separator(&self) -> bool {
-        match self {
+        match &self {
             ExprToken::ParO => true,
             ExprToken::ParC => true,
             ExprToken::Gt => true,
@@ -102,7 +105,7 @@ impl ExprToken {
     }
 
     fn is_relevant_token(&self) -> bool {
-        match self {
+        match &self {
             ExprToken::LineNew => false,
             ExprToken::CarriageReturn => false,
             ExprToken::Tab => false,
@@ -138,6 +141,7 @@ impl ExprToken {
             '\n' => Some(ExprToken::LineNew),
             '\r' => Some(ExprToken::CarriageReturn),
             '\t' => Some(ExprToken::Tab),
+            '=' => Some(ExprToken::Attrib),
             _ => None
         }
     }
@@ -145,7 +149,7 @@ impl ExprToken {
 
 impl fmt::Display for ExprToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
+        let s = match &self {
             ExprToken::Plus => "+",
             ExprToken::UnaryPlus => "+",
             ExprToken::Minus => "-",
@@ -159,6 +163,7 @@ impl fmt::Display for ExprToken {
             ExprToken::BitNot => "~",
             ExprToken::BitShiftR => ">>",
             ExprToken::BitShiftL => "<<",
+            ExprToken::Attrib => "=",
             ExprToken::Gt => ">",
             ExprToken::Lt => "<",
             ExprToken::ParO => "(",
@@ -258,30 +263,67 @@ fn tokenize(str: &str) -> result::Result<Vec<ExprToken>, &str> {
 struct ReversePolish {
 }
 
+enum EvalValue<'a> {
+    Literal(f64),
+    Variable(&'a str, f64)
+}
+
+impl<'a> EvalValue<'a> {
+    fn get(&self) -> f64 {
+        match &self {
+            EvalValue::Literal(v) => *v,
+            EvalValue::Variable(_, v) => *v,
+        }
+    }
+}
+
 impl ReversePolish {
-    fn eval(expr: &Vec<ExprToken>) -> result::Result<f64, &str> {
-        let mut stack: Vec<f64> = Vec::new();
+    fn eval(expr: &Vec<ExprToken>, variables: &mut HashMap<String, f64>) -> result::Result<f64, &'static str> {
+        let mut stack: Vec<EvalValue> = Vec::new();
         for elem in expr.iter() {
-            if elem.is_literal() {
+            if let ExprToken::Word(name) = elem {
+                if let Some(value) = variables.get(name) {
+                    stack.push(EvalValue::Variable(&name, *value));
+                } else {
+                    variables.insert(name.to_string(), 0.0);
+                    stack.push(EvalValue::Variable(&name, 0.0));
+                }
+            } else if elem.is_literal() {
                 let value: f64 = match elem {
                     ExprToken::LiteralFloat(v) => *v,
                     ExprToken::LiteralInt(v) => *v as f64,
                     _ => 0.0
                 };
 
-                stack.push(value);
+                stack.push(EvalValue::Literal(value));
             } else if elem.is_operator() {
                 if elem.get_number_args() == 2 {
                     let a: f64;
                     let b: f64;
-                    if let Some(v) = stack.pop() { b = v; } else {
-                        return Err("Faltou argumentos para o operador!");
+                    let mut variable: Option<&str> = None;
+
+                    if let Some(v) = stack.pop() { b = v.get(); } else {
+                        return Err("Faltou argumentos para o operador!!");
                     }
-                    if let Some(v) = stack.pop() { a = v; } else {
+                    if let Some(v) = stack.pop() { 
+                        a = v.get(); 
+                        if let EvalValue::Variable(nome,value) = v {
+                            variable = Some(nome);
+                        }
+                    } else {
                         return Err("Faltou argumentos para o operador!");
                     }
 
                     let result = match elem {
+                        ExprToken::Attrib => {
+                            if let Some(value) = variables.get_mut(variable.unwrap_or("")) {
+                                *value = b;
+
+                                *value
+                            } else {
+                                return Err("Variável não encontrada");
+                            }
+                        },
                         ExprToken::Mul => a * b,
                         ExprToken::Div => a / b,
                         ExprToken::Rem => a % b,
@@ -296,10 +338,10 @@ impl ReversePolish {
                             return Err("Operador desconhecido");
                         }
                     };
-                    stack.push(result);
+                    stack.push(EvalValue::Literal(result));
                 } else {
                     let a: f64;
-                    if let Some(v) = stack.pop() { a = v; } else {
+                    if let Some(v) = stack.pop() { a = v.get(); } else {
                         return Err("Faltou argumentos para o operador!");
                     }
 
@@ -312,13 +354,13 @@ impl ReversePolish {
                         }
                     };
 
-                    stack.push(result);
+                    stack.push(EvalValue::Literal(result));
                 }
             }
         }
 
         if let Some(result) = stack.pop() {
-            return Ok(result);
+            return Ok(result.get());
         } else {
             return Err("Não tinha nenhum resultado na pilha");
         }
@@ -394,6 +436,9 @@ impl ReversePolish {
             } else if elem.is_literal() {
                 output.push(elem);
                 expecting_value = false;
+            } else if let ExprToken::Word(_) = elem {
+                output.push(elem);
+                expecting_value = false;
             }
         }
 
@@ -406,37 +451,39 @@ impl ReversePolish {
 }
 
 pub fn expression() {
-    let input = leia("Insira a expressão:");
+    let mut vars = HashMap::new();
+    loop {
+        let input = leia(">");
 
-    println!(" ");
+        //println!(" ");
 
-    let result = tokenize(&input);
-    if let Err(message) = result {
-        println!("Erro: {}", message);
-        return;
+        let result = tokenize(&input);
+        if let Err(message) = result {
+            println!("Erro: {}", message);
+            return;
+        }
+
+        let tokens = result.ok().unwrap();
+        /*print!("Recebido: ");
+        for t in tokens.iter() {
+            print!("{} ", t);
+        }
+        println!();*/
+
+        let parsed = ReversePolish::parse_expression(&tokens);
+        /*print!("RPN     : ");
+        for t in parsed.iter() {
+            print!("{} ", t);
+        }
+        println!();*/
+
+        //println!(" ");
+
+        let resultado = ReversePolish::eval(&parsed, &mut vars);
+        if let Ok(value) = resultado {
+            println!("{}", value);
+        } else if let Err(message) = resultado {
+            println!("Erro ao processar: {}", message);
+        }
     }
-
-    let tokens = result.ok().unwrap();
-    print!("Recebido: ");
-    for t in tokens.iter() {
-        print!("{} ", t);
-    }
-    println!();
-
-    let parsed = ReversePolish::parse_expression(&tokens);
-    print!("RPN     : ");
-    for t in parsed.iter() {
-        print!("{} ", t);
-    }
-    println!();
-
-    println!(" ");
-
-    let resultado = ReversePolish::eval(&parsed);
-    if let Ok(value) = resultado {
-        println!("Res     : {}", value);
-    } else if let Err(message) = resultado {
-        println!("Erro ao processar: {}", message);
-    }
-        
 }
