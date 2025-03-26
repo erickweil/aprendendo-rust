@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt::{self, write, Error}, io::Result, num::ParseIntError, result, slice};
 
+use rustyline::{error::ReadlineError, history::FileHistory, DefaultEditor, Editor};
+
 use crate::{estruturas::Dir, utils::leia};
 
 #[derive(PartialEq)]
@@ -190,187 +192,93 @@ impl fmt::Display for ExprToken {
     }
 }
 
-fn tokenize(str: &str) -> result::Result<Vec<ExprToken>, &str> {
-    let mut tokens = Vec::new();
-    let mut strbuff = String::new();
-
-    //let mut i = 0;
-    let mut chars = str.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c >= '0' && c <= '9' { // número
-            let mut is_float = false;
-            strbuff.clear();
-            strbuff.push(c);
-            while let Some(&num_c) = chars.peek() {
-                if (num_c >= '0' && num_c <= '9') || num_c == '.' {
-                    chars.next();
-                    strbuff.push(num_c);
-                    if c == '.' { is_float = true; }
-                } else {
-                    break;
-                }
-            }
-
-            if is_float {
-                let result = strbuff.parse::<f64>();
-                if let Ok(num) = result {
-                    tokens.push(ExprToken::LiteralFloat(num));
-                } else { 
-                    return Err("Número ponto flutuante inválido") 
-                }                
-            } else {
-                let result = strbuff.parse::<i64>();
-                if let Ok(num) = result {
-                    tokens.push(ExprToken::LiteralInt(num));
-                } else {
-                    return Err("Número inteiro inválido") 
-                }
-            }
-        } else if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
-            strbuff.clear();
-            strbuff.push(c);
-            while let Some(&str_c) = chars.peek() {
-                if (str_c >= 'a' && str_c <= 'z') || (str_c >= 'A' && str_c <= 'Z') || (str_c >= '0' && str_c <= '9') || str_c == '_' {
-                    chars.next();
-                    strbuff.push(str_c);
-                } else {
-                    break;
-                }
-            }
-
-            tokens.push(ExprToken::Word(strbuff.clone()));
-        } else if let Some(t0) = ExprToken::from_char(c) {
-            let t1 = ExprToken::from_char(*chars.peek().unwrap_or(&' ')).unwrap_or(ExprToken::Space);
-
-            if t0 == ExprToken::Gt && t1 == ExprToken::Gt {
-                chars.next();
-                tokens.push(ExprToken::BitShiftR);
-            } else if t0 == ExprToken::Lt && t1 == ExprToken::Lt {
-                chars.next();
-                tokens.push(ExprToken::BitShiftL);
-            } else if t0.is_relevant_token() {
-                tokens.push(t0);
-            }            
-        } else {
-            return Err("Remova o caractere, não deveria estar aqui")
+struct Expr(Vec<ExprToken>);
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for t in self.0.iter() {
+            write!(f, "{} ", t);
         }
-
-        //i += 1;
-    }
-
-    return Ok(tokens);
-}
-
-// https://www.andreinc.net/2010/10/05/converting-infix-to-rpn-shunting-yard-algorithm
-// A ideia é implementar análise de expressões
-// de acordo com a notação Reverse Polish Notation
-// Onde '3 1 2 + *' realiza a conta '3 * (1 + 2)'
-struct ReversePolish {
-}
-
-enum EvalValue<'a> {
-    Literal(f64),
-    Variable(&'a str, f64)
-}
-
-impl<'a> EvalValue<'a> {
-    fn get(&self) -> f64 {
-        match &self {
-            EvalValue::Literal(v) => *v,
-            EvalValue::Variable(_, v) => *v,
-        }
+        writeln!(f)
     }
 }
 
-impl ReversePolish {
-    fn eval(expr: &Vec<ExprToken>, variables: &mut HashMap<String, f64>) -> result::Result<f64, &'static str> {
-        let mut stack: Vec<EvalValue> = Vec::new();
-        for elem in expr.iter() {
-            if let ExprToken::Word(name) = elem {
-                if let Some(value) = variables.get(name) {
-                    stack.push(EvalValue::Variable(&name, *value));
-                } else {
-                    variables.insert(name.to_string(), 0.0);
-                    stack.push(EvalValue::Variable(&name, 0.0));
-                }
-            } else if elem.is_literal() {
-                let value: f64 = match elem {
-                    ExprToken::LiteralFloat(v) => *v,
-                    ExprToken::LiteralInt(v) => *v as f64,
-                    _ => 0.0
-                };
+struct ExprParser {}
+impl ExprParser {
+    fn tokenize(str: &str) -> result::Result<Vec<ExprToken>, String> {
+        let mut tokens = Vec::new();
+        let mut strbuff = String::new();
 
-                stack.push(EvalValue::Literal(value));
-            } else if elem.is_operator() {
-                if elem.get_number_args() == 2 {
-                    let a: f64;
-                    let b: f64;
-                    let mut variable: Option<&str> = None;
-
-                    if let Some(v) = stack.pop() { b = v.get(); } else {
-                        return Err("Faltou argumentos para o operador!!");
-                    }
-                    if let Some(v) = stack.pop() { 
-                        a = v.get(); 
-                        if let EvalValue::Variable(nome,value) = v {
-                            variable = Some(nome);
-                        }
+        let mut chars = str.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c >= '0' && c <= '9' { // número
+                let mut is_float = false;
+                strbuff.clear();
+                strbuff.push(c);
+                while let Some(&num_c) = chars.peek() {
+                    if (num_c >= '0' && num_c <= '9') || num_c == '.' {
+                        chars.next();
+                        strbuff.push(num_c);
+                        if num_c == '.' { is_float = true; }
                     } else {
-                        return Err("Faltou argumentos para o operador!");
+                        break;
                     }
-
-                    let result = match elem {
-                        ExprToken::Attrib => {
-                            if let Some(value) = variables.get_mut(variable.unwrap_or("")) {
-                                *value = b;
-
-                                *value
-                            } else {
-                                return Err("Variável não encontrada");
-                            }
-                        },
-                        ExprToken::Mul => a * b,
-                        ExprToken::Div => a / b,
-                        ExprToken::Rem => a % b,
-                        ExprToken::Plus => a + b,
-                        ExprToken::Minus => a - b,
-                        ExprToken::BitShiftR => ((a as i64) >> (b as i64)) as f64,
-                        ExprToken::BitShiftL => ((a as i64) << (b as i64)) as f64,
-                        ExprToken::BitAnd => ((a as i64) & (b as i64)) as f64,
-                        ExprToken::BitXor => ((a as i64) ^ (b as i64)) as f64,
-                        ExprToken::BitOr => ((a as i64) | (b as i64)) as f64,
-                        _ => {
-                            return Err("Operador desconhecido");
-                        }
-                    };
-                    stack.push(EvalValue::Literal(result));
-                } else {
-                    let a: f64;
-                    if let Some(v) = stack.pop() { a = v.get(); } else {
-                        return Err("Faltou argumentos para o operador!");
-                    }
-
-                    let result = match elem {
-                        ExprToken::UnaryMinus => -a,
-                        ExprToken::UnaryPlus => -a,
-                        ExprToken::BitNot => (!(a as i64)) as f64,
-                        _ => {
-                            return Err("Operador unitário desconhecido");
-                        }
-                    };
-
-                    stack.push(EvalValue::Literal(result));
                 }
+
+                if is_float {
+                    let result = strbuff.parse::<f64>();
+                    if let Ok(num) = result {
+                        tokens.push(ExprToken::LiteralFloat(num));
+                    } else { 
+                        return Err(format!("Número ponto flutuante inválido: '{}'", strbuff));
+                    }                
+                } else {
+                    let result = strbuff.parse::<i64>();
+                    if let Ok(num) = result {
+                        tokens.push(ExprToken::LiteralInt(num));
+                    } else {
+                        return Err(format!("Número inteiro inválido: '{}'", strbuff));
+                    }
+                }
+            } else if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+                strbuff.clear();
+                strbuff.push(c);
+                while let Some(&str_c) = chars.peek() {
+                    if (str_c >= 'a' && str_c <= 'z') || (str_c >= 'A' && str_c <= 'Z') || (str_c >= '0' && str_c <= '9') || str_c == '_' {
+                        chars.next();
+                        strbuff.push(str_c);
+                    } else {
+                        break;
+                    }
+                }
+
+                tokens.push(ExprToken::Word(strbuff.clone()));
+            } else if let Some(t0) = ExprToken::from_char(c) {
+                let t1 = ExprToken::from_char(*chars.peek().unwrap_or(&' ')).unwrap_or(ExprToken::Space);
+
+                if t0 == ExprToken::Gt && t1 == ExprToken::Gt {
+                    chars.next();
+                    tokens.push(ExprToken::BitShiftR);
+                } else if t0 == ExprToken::Lt && t1 == ExprToken::Lt {
+                    chars.next();
+                    tokens.push(ExprToken::BitShiftL);
+                } else if t0 == ExprToken::Mul && t1 == ExprToken::Mul {
+                    chars.next();
+                    tokens.push(ExprToken::Exp);
+                } else if t0.is_relevant_token() {
+                    tokens.push(t0);
+                }            
+            } else {
+                return Err(format!("Caractere inválido: '{}'", c));
             }
         }
 
-        if let Some(result) = stack.pop() {
-            return Ok(result.get());
-        } else {
-            return Err("Não tinha nenhum resultado na pilha");
-        }
+        return Ok(tokens);
     }
 
+    // https://www.andreinc.net/2010/10/05/converting-infix-to-rpn-shunting-yard-algorithm
+    // A ideia é implementar análise de expressões
+    // de acordo com a notação Reverse Polish Notation
+    // Onde '3 1 2 + *' realiza a conta '3 * (1 + 2)'
     /**
         Para todos os tokens:
             Leia o próximo token
@@ -392,15 +300,15 @@ impl ReversePolish {
         
         Por último, remove tudo da stack e printa
     */
-    fn parse_expression(expr: &Vec<ExprToken>) -> Vec<ExprToken> {
+    fn convert_to_rpn(expr: &Vec<ExprToken>, expecting_value: &mut bool) -> Vec<ExprToken> {
         let mut output: Vec<ExprToken> = Vec::new();
         let mut stack:  Vec<ExprToken> = Vec::new(); // Pilha com operadores e ( )
 
-        let mut expecting_value = true;
+        //let mut expecting_value = true;
         for mut elem in expr.clone().into_iter() {
             if elem == ExprToken::ParO {
                 stack.push(elem);
-                expecting_value = true;
+                *expecting_value = true;
             } else if elem == ExprToken::ParC {
                 while let Some(stackop) = stack.pop() {
                     if stackop == ExprToken::ParO {
@@ -408,10 +316,10 @@ impl ReversePolish {
                     }
                     output.push(stackop);
                 }
-                expecting_value = false;
-                // stack.pop(); // pop '('
+                *expecting_value = false;
+                // stack.pop(); // pop '(' ?
             } else if elem.is_operator() {
-                if expecting_value {
+                if *expecting_value {
                     if elem == ExprToken::Plus {
                         elem = ExprToken::UnaryPlus;
                     }
@@ -437,13 +345,13 @@ impl ReversePolish {
                 }
 
                 stack.push(elem);
-                expecting_value = true;
+                *expecting_value = true;
             } else if elem.is_literal() {
                 output.push(elem);
-                expecting_value = false;
+                *expecting_value = false;
             } else if let ExprToken::Word(_) = elem {
                 output.push(elem);
-                expecting_value = false;
+                *expecting_value = false;
             }
         }
 
@@ -455,40 +363,194 @@ impl ReversePolish {
     }
 }
 
+enum EvalValue {
+    Literal(f64),
+    Variable(String, f64)
+}
+
+impl EvalValue {
+    fn get(&self) -> f64 {
+        match &self {
+            EvalValue::Literal(v) => *v,
+            EvalValue::Variable(_, v) => *v,
+        }
+    }
+}
+struct StackMachine {
+    vars: HashMap<String, f64>,
+    stack: Vec<EvalValue>
+}
+
+impl StackMachine {
+
+    fn new() -> StackMachine {
+        StackMachine { 
+            vars: HashMap::new(),
+            stack: Vec::new()
+        }
+    }
+
+    fn eval(&mut self, expr: Vec<ExprToken>) -> result::Result<f64, String> {
+        self.stack.clear();
+
+        for elem in expr.into_iter() {
+            if let ExprToken::Word(name) = elem {
+                if let Some((key, value)) = self.vars.get_key_value(&name) {
+                    self.stack.push(EvalValue::Variable(name, *value));
+                } else {
+                    self.vars.insert(name.clone(), 0.0);
+                    self.stack.push(EvalValue::Variable(name, 0.0));
+                }
+            } else if elem.is_literal() {
+                let value: f64 = match elem {
+                    ExprToken::LiteralFloat(v) => v,
+                    ExprToken::LiteralInt(v) => v as f64,
+                    _ => 0.0
+                };
+
+                self.stack.push(EvalValue::Literal(value));
+            } else if elem.is_operator() {
+                if elem.get_number_args() == 2 {
+                    let a: f64;
+                    let b: f64;
+                    let mut variable: Option<String> = None;
+
+                    if let Some(v) = self.stack.pop() { b = v.get(); } else {
+                        return Err(format!("Faltou argumentos para o operador {}", elem));
+                    }
+                    if let Some(v) = self.stack.pop() { 
+                        a = v.get(); 
+                        if let EvalValue::Variable(nome,value) = v {
+                            variable = Some(nome);
+                        }
+                    } else {
+                        return Err(format!("Faltou o segundo argumento para o operador {}", elem));
+                    }
+
+                    let result = match elem {
+                        ExprToken::Attrib => {
+                            if variable == None {
+                                return Err(format!("O lado esquerdo do operador = deve ser uma variável"));
+                            }
+                            let variable = variable.unwrap();
+
+                            if let Some(value) = self.vars.get_mut(&variable) {
+                                *value = b;
+
+                                *value
+                            } else {
+                                return Err(format!("Variável '{}' não encontrada", variable));
+                            }
+                        },
+                        ExprToken::Mul => a * b,
+                        ExprToken::Div => a / b,
+                        ExprToken::Rem => a % b,
+                        ExprToken::Plus => a + b,
+                        ExprToken::Minus => a - b,
+                        ExprToken::Exp => a.powf(b),
+                        ExprToken::BitShiftR => ((a as i64) >> (b as i64)) as f64,
+                        ExprToken::BitShiftL => ((a as i64) << (b as i64)) as f64,
+                        ExprToken::BitAnd => ((a as i64) & (b as i64)) as f64,
+                        ExprToken::BitXor => ((a as i64) ^ (b as i64)) as f64,
+                        ExprToken::BitOr => ((a as i64) | (b as i64)) as f64,
+                        _ => {
+                            return Err(format!("Operador '{}' desconhecido", elem));
+                        }
+                    };
+                    self.stack.push(EvalValue::Literal(result));
+                } else {
+                    let a: f64;
+                    if let Some(v) = self.stack.pop() { a = v.get(); } else {
+                        return Err(format!("Faltou o argumento para o operador unitário {}", elem));
+                    }
+
+                    let result = match elem {
+                        ExprToken::UnaryMinus => -a,
+                        ExprToken::UnaryPlus => a,
+                        ExprToken::BitNot => (!(a as i64)) as f64,
+                        _ => {
+                            return Err(format!("Operador unitário '{}' desconhecido", elem));
+                        }
+                    };
+
+                    self.stack.push(EvalValue::Literal(result));
+                }
+            }
+        }
+
+        if let Some(result) = self.stack.pop() {
+            return Ok(result.get());
+        } else {
+            return Err(format!("Não tinha nenhum resultado na pilha"));
+        }
+    }
+}
+
 pub fn expression() {
-    let mut vars = HashMap::new();
+    // `()` can be used when no completer is required
+    let mut rl = DefaultEditor::new().unwrap();
+
+    let mut vm = StackMachine::new();
+    let mut prev_input: Option<String> = None;
     loop {
-        let input = leia(">");
+        let mut input: String;
+        let result = rl.readline(if prev_input == None { "> " } else { "| " });
+        match result {
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break
+            },
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break
+            },
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break
+            }
+            Ok(line) => {
+                rl.add_history_entry(line.as_str());
+                input = line.to_uppercase();
+            }
+        }
 
-        //println!(" ");
+        if let Some(mut prev) = prev_input.take() {
+            prev.push_str(&input);
+            input = prev;
+        }
 
-        let result = tokenize(&input);
+        if input == "" {
+            println!("Você deve escrever uma expressão, ex: 'A = 1 + 2'");
+            continue;
+        } else if input == "VARS" {
+            for (key,value) in vm.vars.iter() {
+                println!("{}: {}", key, value);
+            }
+            continue;
+        }
+
+        let result = ExprParser::tokenize(&input);
         if let Err(message) = result {
             println!("Erro: {}", message);
-            return;
+            continue;
         }
 
         let tokens = result.ok().unwrap();
-        /*print!("Recebido: ");
-        for t in tokens.iter() {
-            print!("{} ", t);
+        let mut expecting_value = true;
+        let expr_rpn = ExprParser::convert_to_rpn(&tokens, &mut expecting_value);
+
+        // Para continuar escrevendo na próxima linha
+        if expecting_value {
+            prev_input = Some(input);
+            continue;
         }
-        println!();*/
 
-        let parsed = ReversePolish::parse_expression(&tokens);
-        /*print!("RPN     : ");
-        for t in parsed.iter() {
-            print!("{} ", t);
-        }
-        println!();*/
-
-        //println!(" ");
-
-        let resultado = ReversePolish::eval(&parsed, &mut vars);
+        let resultado = vm.eval(expr_rpn);
         if let Ok(value) = resultado {
             println!("{}", value);
         } else if let Err(message) = resultado {
             println!("Erro ao processar: {}", message);
+            continue;
         }
     }
 }
