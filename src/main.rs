@@ -25,7 +25,7 @@ fn main() {
             println!("- minesweeper");
             println!("- expression");
             
-            escolha = leia("").to_lowercase();
+            escolha = leia(">").to_lowercase();
         }
         
         if escolha == "" {
@@ -53,7 +53,7 @@ fn main() {
             }
 
             println!("{}",DIVISORIA);
-            let resposta = leia("Deseja executar denovo? [S]/n").to_lowercase();
+            let resposta = leia("Deseja executar denovo? [S]/n \n>").to_lowercase();
             if resposta != "s" && resposta != "" {
                 break;
             } else {

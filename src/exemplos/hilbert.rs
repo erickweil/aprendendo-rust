@@ -105,7 +105,7 @@ fn get_line_char(prev: Dir, next: Dir) -> char {
 }
 
 pub fn hilbert() {
-    let input = leia("Qual a profundidade da curva de Hilbert? (padrão 3)");
+    let input = leia("Qual a profundidade da curva de Hilbert? (padrão 3)\n>");
     let profundidade: i32 = input.parse::<i32>().unwrap_or(3);
 
     if profundidade < 0 || profundidade > 10 {

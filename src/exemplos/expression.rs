@@ -18,6 +18,7 @@ enum ExprToken {
     BitNot,
     BitShiftR,
     BitShiftL,
+    Exp,
     Attrib,
 
     Gt,
@@ -39,6 +40,7 @@ impl ExprToken {
         match &self {
             ExprToken::ParO => 20,
             ExprToken::ParC => 20,
+            ExprToken::Exp => 14,
             ExprToken::UnaryPlus => 13,
             ExprToken::UnaryMinus => 13,
             ExprToken::BitNot => 13,
@@ -66,6 +68,7 @@ impl ExprToken {
             ExprToken::UnaryPlus => Dir::Right,
             ExprToken::UnaryMinus => Dir::Right,
             ExprToken::BitNot => Dir::Right,
+            ExprToken::Exp => Dir::Right,
             _ => Dir::Left
         }
     }
@@ -80,6 +83,7 @@ impl ExprToken {
             ExprToken::Rem => 2,
             ExprToken::Plus => 2,
             ExprToken::Minus => 2,
+            ExprToken::Exp => 2,
             ExprToken::BitShiftR => 2,
             ExprToken::BitShiftL => 2,
             ExprToken::BitAnd => 2,
@@ -157,6 +161,7 @@ impl fmt::Display for ExprToken {
             ExprToken::Mul => "*",
             ExprToken::Div => "/",
             ExprToken::Rem => "%",
+            ExprToken::Exp => "**",
             ExprToken::BitAnd => "&",
             ExprToken::BitOr => "|",
             ExprToken::BitXor => "^",

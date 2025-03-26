@@ -1,7 +1,7 @@
 use crate::utils::leia;
 
 pub fn fib() {
-    let input = leia("Até quanto contar fibonacci? (padrão 34)");
+    let input = leia("Até quanto contar fibonacci? (padrão 34) \n>");
     
     let maximo: u128 = input.parse::<u128>().unwrap_or(34);
 

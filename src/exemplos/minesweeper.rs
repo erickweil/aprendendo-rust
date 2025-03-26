@@ -115,7 +115,7 @@ impl MineSweeperGame {
     fn inicializar_grade(grade: &mut Vec2D<GradeCell>, center: (i32, i32)) -> i32 {
         let mut rng = rand::rng();
         let (w,h) = grade.size();
-        let gerar_minas = grade.len() / 20 + 1;
+        let gerar_minas = grade.len() / 10 + 1;
         let mut total_minas = 0;
         for _ in 0..gerar_minas {
             let rdnpos = (
