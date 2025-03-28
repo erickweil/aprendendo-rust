@@ -184,6 +184,7 @@ Para executar os exemplos, execute `cargo run <nome>`
 - **life** [Jogo da Vida (Conway Game of Life)](src/exemplos/life.rs)
 - **snake** [Jogo da 'Cobrinha' (Snake Game)](src/exemplos/snake.rs)
 - **minesweeper** [Campo Minado (Minewsweeper)](src/exemplos/minesweeper.rs)
+- **expression** [Parser expressões matemáticas](src/exemplos/expression.rs)
 
 # Ideias, Trabalho futuro
 
@@ -208,4 +209,3 @@ Porém, antes de chegar e fazer algo complexo como um gerador de horário, vamos
 - Simulador de Máquina de Turing – Crie uma simulação básica de uma Máquina de Turing com regras configuráveis.
 - Algoritmos Genéticos – Resolva um problema simples (como encontrar uma string alvo) usando um algoritmo genético.
 - Solução de Sudoku – Escreva um solver eficiente usando Backtracking ou Constraint Propagation.
-- Verificador de Expressões Matemáticas – Crie um parser que valida e avalia expressões matemáticas com parênteses e operadores.

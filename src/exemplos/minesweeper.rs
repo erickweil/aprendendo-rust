@@ -4,7 +4,7 @@ use rand::Rng;
 
 use crossterm::{cursor::*, event::*, queue, style::*, terminal::{self, Clear, ClearType}, ExecutableCommand, QueueableCommand};
 
-use crate::{estruturas::{Dir, GraphTraversal, GraphTraversalIter, Iterator2D, LinkedStack, Stack, Vec2D}, utils::{Terminal, TerminalHandler}};
+use crate::{estruturas::{Dir, GraphTraversal, GraphTraversalIter, GraphTraversalIterState, Iterator2D, LinkedStack, Stack, Vec2D}, utils::{Terminal, TerminalHandler}};
 
 #[derive(Clone)]
 enum GradeCell {
@@ -36,7 +36,7 @@ struct MineSweeperGame {
 }
 
 impl GraphTraversal<(usize,usize)> for MineSweeperGame {    
-    fn visit<'a>(&mut self, (gx,gy): (usize,usize), neighbors: &'a mut Vec<(usize,usize)>) -> &'a mut Vec<(usize,usize)> {
+    fn visit<'a>(&mut self, (gx,gy): (usize,usize), state: &'a mut GraphTraversalIterState<(usize,usize)>) {
         let (w,h) = self.grade.size();
         if let GradeCell::Empty { minas, explorado } = &mut self.grade[(gx,gy)] {
             // explorar ele próprio
@@ -58,14 +58,12 @@ impl GraphTraversal<(usize,usize)> for MineSweeperGame {
                         (gx-1, gy+1), (gx  ,gy+1), (gx+1, gy+1)
                     ].into_iter().for_each(|(x,y)| {
                         if x >= 0 && y >= 0 && x < w && y < h {
-                            neighbors.push((x as usize, y as usize));
+                            state.add_neighbor((x as usize, y as usize));
                         }
                     });
                 }
             }
         }
-
-        return neighbors;
     }
 }
 

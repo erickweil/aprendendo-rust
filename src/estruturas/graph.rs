@@ -1,14 +1,33 @@
-use std::{collections::{HashSet, VecDeque}, hash::Hash};
+use std::{collections::{HashSet, VecDeque}, hash::Hash, marker::PhantomData};
 
 use super::{VecPool, NULL_INDEX};
 
-pub trait GraphTraversal<T> {
+pub trait GraphTraversal<T>
+where
+    T: Clone + Eq + Hash {
     /**
      * Função que irá ser chamada quando um node é visitado
      * next é um array vazio que poderá ser preenchido com os próximos vizinhos,
      * Mas também pode retornar outro array se quiser
     */
-    fn visit<'a>(&mut self, node: T, neighbors: &'a mut Vec<T>) -> &'a mut Vec<T>;
+    fn visit(&mut self, node: T, iter_state: &mut GraphTraversalIterState<T>);
+}
+
+pub struct GraphTraversalIterState<T> 
+{
+    visited: HashSet<T>,
+    to_explore: VecDeque<T>
+}
+
+impl<T> GraphTraversalIterState<T> 
+where
+    T: Clone + Eq + Hash
+{
+    pub fn add_neighbor(&mut self, neighbor: T) {
+        if !self.visited.contains(&neighbor) {
+            self.to_explore.push_back(neighbor);
+        }
+    }
 }
 
 /**
@@ -16,54 +35,49 @@ pub trait GraphTraversal<T> {
  */
 pub struct GraphTraversalIter<'a, T, G>
 where
-    T: Copy + Eq + Hash,
+    T: Clone + Eq + Hash,
     G: GraphTraversal<T>,
 {
     graph: &'a mut G,
-    visited: HashSet<T>,
-    to_explore: VecDeque<T>,
-    neighbors_cache: Vec<T>
+    iter_state: GraphTraversalIterState<T>,
+    depth_first: bool
 }
 
 impl <'a, T, G> GraphTraversalIter<'a, T, G> 
 where
-    T: Copy + Eq + Hash,
+    T: Clone + Eq + Hash,
     G: GraphTraversal<T> 
 {
-    fn new(graph: &'a mut G, start: T) -> GraphTraversalIter<'a, T, G> {
+    fn new(graph: &'a mut G, start: T, depth_first: bool) -> GraphTraversalIter<'a, T, G> {
         let mut to_explore = VecDeque::new();
         to_explore.push_back(start);
 
         GraphTraversalIter {
             graph: graph,
-            visited: HashSet::new(),
-            to_explore: to_explore,
-            neighbors_cache: Vec::new()
+            iter_state: GraphTraversalIterState {
+                visited: HashSet::new(),
+                to_explore: to_explore
+            },
+            depth_first: depth_first
         }
     }
 
     pub fn depth_first(graph: &'a mut G, start: T) {
-        GraphTraversalIter::new(graph, start).traversal(true);
+        GraphTraversalIter::new(graph, start, true).traversal();
     }
 
     pub fn breadth_first(graph: &'a mut G, start: T) {
-        GraphTraversalIter::new(graph, start).traversal(false);
+        GraphTraversalIter::new(graph, start, false).traversal();
     }
     
-    fn traversal(&mut self, depth_first: bool) {
-        while let Some(node_index) = if depth_first { self.to_explore.pop_back() } else { self.to_explore.pop_front() } {
-            // Insere na lista, e se já esá visitado deve pular este nó
-            if !self.visited.insert(node_index) {
-                continue;        
+    fn traversal(&mut self) {
+        while let Some(node_index) = if self.depth_first { self.iter_state.to_explore.pop_back() } else { self.iter_state.to_explore.pop_front() } {
+            // Insere na lista, e se já está visitado deve pular este nó
+            if !self.iter_state.visited.insert(node_index.clone()) {
+                continue;
             }
             
-            self.neighbors_cache.clear();
-            let neighbors = self.graph.visit(node_index, &mut self.neighbors_cache);
-            for &neighbor in neighbors.iter() {
-                if !self.visited.contains(&neighbor) {
-                    self.to_explore.push_back(neighbor);
-                }
-            }
+            self.graph.visit(node_index, &mut self.iter_state);
         }
     }
 }
@@ -77,34 +91,34 @@ for pos in GraphTraversalIter::breadth_first_iter(self, (gx, gy)) {
     // se o iterator fizer borrow imutable pode só ler
 }
 
-sem usar .clone() é inviável usar o iterator
+sem usar .clone() é inviável usar o iterator*/
+pub struct GraphTraversalIter2 { }
+impl GraphTraversalIter2 {    
+    fn traversal<G, T, CB>(graph: &mut G, start: T, depth_first: bool, mut callback: CB)
+    where
+        T: Clone + Eq + Hash,
+        G: GraphTraversal<T>,
+        CB: FnMut(&mut G, T)
+    {
+        let mut to_explore = VecDeque::new();
+        to_explore.push_back(start);
 
-impl<'a, T: Copy + Eq + Hash> Iterator for GraphTraversalIter<'a, T> {
-    type Item = T;
+        let mut iter_state = GraphTraversalIterState {
+            visited: HashSet::new(),
+            to_explore: to_explore
+        };
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let depth_first = false;
-        while let Some(node_index) = if depth_first { self.to_explore.pop_back() } else { self.to_explore.pop_front() } {
-            if !self.visited.insert(node_index) {
+        while let Some(node_index) = if depth_first { iter_state.to_explore.pop_back() } else { iter_state.to_explore.pop_front() } {
+            // Insere na lista, e se já está visitado deve pular este nó
+            if !iter_state.visited.insert(node_index.clone()) {
                 continue;
             }
-
-            // Limpa e reutiliza o buffer
-            self.neighbors_cache.clear();
-            let neighbors = self.graph.get_neighbors(node_index, &mut self.neighbors_cache);
-            for &neighbor in neighbors.iter() {
-                if !self.visited.contains(&neighbor) { // Marca como visitado já na inserção
-                    self.to_explore.push_back(neighbor);
-                }
-            }
-
-            return Some(node_index);
+            
+            graph.visit(node_index.clone(), &mut iter_state);
+            (callback)(graph, node_index);
         }
-        None
     }
 }
-*/
-
 
 // Falta decidir como usar melhor isso
 pub struct GraphPool<T> {
@@ -126,9 +140,11 @@ impl<T> GraphPool<T> {
     }
 }
 
-impl<T> GraphTraversal<usize> for GraphPool<T> {
-    fn visit<'a>(&mut self, node: usize, neighbors: &'a mut Vec<usize>) -> &'a mut Vec<usize> {
-        return neighbors;
+impl<'a, T> GraphTraversal<usize> for GraphPoolNode<T> {
+    fn visit(&mut self, node: usize, state: &mut GraphTraversalIterState<usize>) {
+        for c in self.conns.iter() {
+            state.add_neighbor(*c);
+        }
     }
 }
 
@@ -147,8 +163,8 @@ mod test {
             received: String
         }
 
-        impl GraphTraversal<i32> for TestVisit {
-            fn visit<'a>(&mut self, node: i32, neighbors: &'a mut Vec<i32>) -> &'a mut Vec<i32> {
+        impl<'a> GraphTraversal<i32> for TestVisit {
+            fn visit(&mut self, node: i32, iter_state: &mut GraphTraversalIterState<i32>) {
                 // Test
                 let mut chars = self.str.chars();
                 let prev = if node > 0 { chars.nth((node-1) as usize) } else { None };
@@ -160,14 +176,21 @@ mod test {
 
                 // Add neighbors
                 if prev != Some(' ') && prev != None {
-                    neighbors.push(node-1);
+                    iter_state.add_neighbor(node-1);
                 }
                 if next != Some(' ') && next != None {
-                    neighbors.push(node+1);
+                    iter_state.add_neighbor(node+1);
                 }
-
-                neighbors
             }
+        }
+
+        {
+            let mut test = TestVisit { str: String::from("jabuticaba   abc"), received: String::new() };
+            let mut received = String::new();
+            GraphTraversalIter2::traversal(&mut test, 0, true, |test, index| {
+                received.push(test.str.chars().nth(index as usize).unwrap());
+            });
+            assert_eq!(test.received, String::from("jabuticaba"));
         }
 
         {

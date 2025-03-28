@@ -2,6 +2,7 @@ use std::io;
 use std::mem;
 
 use crossterm::{cursor::*, event::KeyCode, style::*, terminal::*, ExecutableCommand, QueueableCommand};
+use rand::Rng;
 
 use crate::{estruturas::Vec2D, utils::{Terminal, TerminalHandler}};
 
@@ -39,6 +40,14 @@ impl Life {
             counter: 0,
             paused: true,
             fast: false
+        }
+    }
+
+    pub fn grade_aleatorio(&mut self) {
+        let mut rng = rand::rng();
+
+        for pos in self.grade.positions() {
+            self.grade[pos] = rng.random_bool(1.0 / 2.0);
         }
     }
 
@@ -161,6 +170,7 @@ impl TerminalHandler for Life {
 
     fn on_key_event(&mut self, e: &crossterm::event::KeyEvent) {
         match e.code {
+            KeyCode::Char('g') => { self.grade_aleatorio(); }
             KeyCode::Char('f') => { self.fast = true; }
             KeyCode::Char(' ') => { self.paused = !self.paused; }
             KeyCode::Enter => {
