@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
-use basico::{LinkedStack, Queue, Stack};
+use basico::{Queue, Stack};
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use rand::{rng, Rng};
 
-fn despejar<T>(entrada: &mut LinkedStack<T>,saida: &mut LinkedStack<T>) -> Option<T> {
+/*fn despejar<T>(entrada: &mut LinkedStack<T>,saida: &mut LinkedStack<T>) -> Option<T> {
     if saida.len() <= 0 { 
         if entrada.len() <= 0 { return None; }
 
@@ -14,7 +14,7 @@ fn despejar<T>(entrada: &mut LinkedStack<T>,saida: &mut LinkedStack<T>) -> Optio
         }
     }
     return saida.pop();
-}
+}*/
 
 fn linked_list(c: &mut Criterion) {
     let size = 10_000;

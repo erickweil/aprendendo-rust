@@ -1,8 +1,5 @@
 use std::marker::PhantomData;
 
-use super::{LinkedStack, Stack};
-
-
 pub trait Queue<T> {
     /**
      * Insere um elemento no final da fila
