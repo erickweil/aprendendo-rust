@@ -18,3 +18,6 @@ pub use minesweeper::*;
 
 mod expression;
 pub use expression::*;
+
+mod dungeon;
+pub use dungeon::*;
