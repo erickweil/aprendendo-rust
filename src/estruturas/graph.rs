@@ -99,7 +99,7 @@ where
         }
     }
 
-    pub fn next(&mut self) -> Option<T> {
+    pub fn next(&mut self) -> Option<&LinkedStack<T>> {
         while let Some(path) = if self.depth_first { 
             self.to_explore.pop_back() 
         } else { 
@@ -112,7 +112,7 @@ where
             }
 
             self.current_path = Some(path);
-            return Some(node_index);
+            return self.current_path.as_ref();
         }
         return None;
     }
@@ -282,7 +282,8 @@ mod test {
         {
             let mut visited = String::new();
             let mut iter_state = GraphSearch::breadth_first(b);
-            while let Some(node_index) = iter_state.next() {            
+            while let Some(path) = iter_state.next() {
+                let node_index = path.peek().unwrap().clone();
                 let c = graph.visit(node_index, &mut iter_state);
                 
                 visited.push(*c);
