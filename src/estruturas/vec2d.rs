@@ -27,7 +27,7 @@ impl<T> Vec2D<T> where T: Clone {
         return Iterator2D::xy((self.width, self.height));
     }
 
-    pub fn _clear(&mut self, value: T) {
+    pub fn clear(&mut self, value: T) {
         self.data.clear();
         self.data.resize(self.width * self.height, value);
     }

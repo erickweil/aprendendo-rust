@@ -1,7 +1,7 @@
 use std::{cmp::{max, min}, io::{self, Stdout}};
 
 use crossterm::{cursor::*, event::KeyCode, style::*, terminal::*, ExecutableCommand, QueueableCommand};
-use rand::{seq::SliceRandom, Rng};
+use rand::{rngs::{StdRng, ThreadRng}, seq::SliceRandom, Rng, SeedableRng};
 
 use crate::{estruturas::{Dir, GraphIter, GraphIterState, GraphSearch, Stack, Vec2D}, utils::{StyledChar, Terminal, TerminalHandler, TerminalScreen}};
 
@@ -19,13 +19,14 @@ enum Tile {
     WallUJointW,
     WallUJointS,
     WallUJointE,
+    Stairs,
     Ground
 }
 
 impl Tile {
-    fn get_char(&self, back: Color) -> StyledChar {
-        match self {
-            Tile::Void   => StyledChar::new(' ', back, Color::White),
+    fn get_chars(&self, back: Color) -> (StyledChar, StyledChar) {
+        let b = match self {
+            Tile::Void   => StyledChar::new(' ', back, Color::DarkYellow),
             Tile::WallV  => StyledChar::new('║', back, Color::DarkYellow),
             Tile::WallH  => StyledChar::new('═', back, Color::DarkYellow),
             Tile::WallNE => StyledChar::new('╗', back, Color::DarkYellow),
@@ -37,8 +38,17 @@ impl Tile {
             Tile::WallUJointS => StyledChar::new('╩', back, Color::DarkYellow),
             Tile::WallUJointE => StyledChar::new('╣', back, Color::DarkYellow),
             Tile::WallCross => StyledChar::new('╬', back, Color::DarkYellow),
+            Tile::Stairs => StyledChar::new('⇕', back, Color::Magenta),
             Tile::Ground => StyledChar::new(' ', back, Color::DarkYellow)
-        }
+        };
+
+        let a = if self == &Tile::WallH || self == &Tile::WallNE || self == &Tile::WallSE || self == &Tile::WallUJointE || self == &Tile::WallUJointN || self == &Tile::WallUJointS || self == &Tile::WallCross {
+            StyledChar::new('═', back, Color::DarkYellow)
+        } else {
+            StyledChar::new(' ', back, Color::DarkYellow)
+        };
+
+        (a,b)
     }
 
     fn get_wall(n: bool, w: bool, s: bool, e: bool) -> Tile {
@@ -91,20 +101,23 @@ impl MapTile {
 struct DungeonGame {
     screen: TerminalScreen,
     tiles: Vec2D<MapTile>,
-    pos: (i32, i32)
+    pos: (i32, i32),
+
+    seed: u64,
+    level: i32,
+    next_level: bool
 }
 
 impl DungeonGame {
     fn new (size: (usize, usize)) -> DungeonGame {       
         let mut g = DungeonGame {
             screen: TerminalScreen::new(size),
-            tiles: Vec2D::new(size.0, size.1, MapTile::new(Tile::Void)),
-            pos: (0,0)
+            tiles: Vec2D::new(size.0/2, size.1, MapTile::new(Tile::Void)),
+            pos: (0,0),
+            seed: 0xcafe,
+            level: 0,
+            next_level: true
         };
-
-        g.generate_maze();
-        g.open_rooms();
-        g.fill_walls();
 
         return g;
     }
@@ -133,33 +146,25 @@ impl DungeonGame {
 
     This algorithm also has the virtues of being extremely fast (even on MUCH bigger grid arrays than 3x3), and guaranteed to succeed.
     */
-    fn open_rooms(&mut self) {
+    fn open_rooms(&mut self, rng: &mut StdRng) {
         let (w,h) = self.tiles.size();
-        let mut rng = rand::rng();
 
-        for room in 0..(w/10+2) {
-            let a = (
-                rng.random_range(1..w-1),
-                rng.random_range(1..h-1)
+        let max_room_size = 12;
+        // Em média 4/5 dos espaços serão labirinto e o resto salas
+        let max_room_count = 1 + ((w*h) / ((max_room_size/2)*(max_room_size/2))) / 5;
+        for room in 0..max_room_count {
+            let sz = (
+                rng.random_range(4..max_room_size),
+                rng.random_range(4..max_room_size)
             );
 
-            let b = (
-                rng.random_range(1..w-1),
-                rng.random_range(1..h-1)
+            let pos = (
+                rng.random_range((sz.0/2)..(w-1)-(sz.0/2)),
+                rng.random_range((sz.1/2)..(h-1)-(sz.1/2)),
             );
 
-            let mut start = (min(a.0, b.0), min(a.1, b.1));
-            let mut end = (max(a.0, b.0), max(a.1, b.1));
-
-            while end.0 - start.0 > 10 {
-                start.0 += 1;
-                end.0 -= 1;
-            }
-
-            while end.1 - start.1 > 10 {
-                start.1 += 1;
-                end.1 -= 1;
-            }
+            let mut start = (pos.0 - sz.0/2, pos.1 - sz.1/2);
+            let mut end = (pos.0 + sz.0/2, pos.1 + sz.1/2);
 
             for x in start.0..end.0 {
                 for y in start.1..end.1 {
@@ -167,13 +172,18 @@ impl DungeonGame {
                 }
             }
 
-            self.pos = (((start.0 + end.0)/2) as i32,((start.1 + end.1)/2) as i32);
+            let center = ((start.0 + end.0)/2, (start.1 + end.1)/2);
+            self.pos = (center.0 as i32,center.1 as i32);
+
+            if room == 0 {
+                self.tiles[center].tile = Tile::Stairs;
+            }
         }
     }
 
-    fn generate_maze(&mut self) {
+    fn generate_maze(&mut self, rng: &mut StdRng) {
         let mut iter = GraphSearch::<(i32, i32)>::depth_first((0,0));
-        let (w,h) = self.screen.size();
+        let (w,h) = self.tiles.size();
         let (mw,mh) = (w as i32 / 2, h as i32 / 2);
         while let Some(path) = iter.next() {
             let mut path = path.clone();
@@ -186,8 +196,7 @@ impl DungeonGame {
 
             // Add neighbors
             let mut neighs = [(mx+1,my),(mx,my-1),(mx-1,my),(mx,my+1)];
-            let mut rng = rand::rng();
-            neighs.shuffle(&mut rng);
+            neighs.shuffle(rng);
             
             for neigh in neighs {
                 if neigh.0 >= 0 && neigh.0 < mw && neigh.1 >= 0 && neigh.1 < mh {
@@ -222,17 +231,26 @@ impl DungeonGame {
             if tile == Tile::Void {
                 continue;
             }
+
+            let screen_pos_a = (pos.0 * 2, pos.1);
+            let screen_pos_b = (pos.0 * 2 + 1, pos.1);
+
             if !maptile.explored {
-                self.screen.set(t, pos, StyledChar::new(' ', Color::Grey, Color::DarkYellow))?;
+                self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::Grey, Color::DarkYellow))?;
+                self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::Grey, Color::DarkYellow))?;
             } else {
                 if tile == Tile::Ground {
                     if maptile.visible {
-                        self.screen.set(t, pos, StyledChar::new(' ', Color::Black, Color::DarkYellow))?;
+                        self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::Black, Color::DarkYellow))?;
+                        self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::Black, Color::DarkYellow))?;
                     } else {
-                        self.screen.set(t, pos, StyledChar::new(' ', Color::DarkGrey, Color::DarkYellow))?;
+                        self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::DarkGrey, Color::DarkYellow))?;
+                        self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::DarkGrey, Color::DarkYellow))?;
                     }
                 } else {
-                    self.screen.set(t, pos, tile.get_char(if maptile.visible { Color::Black } else { Color::DarkGrey }))?;
+                    let (ca, cb) = tile.get_chars(if maptile.visible { Color::Black } else { Color::DarkGrey });
+                    self.screen.set(t, screen_pos_a, ca)?;
+                    self.screen.set(t, screen_pos_b, cb)?;
                 }
             }
 
@@ -274,55 +292,58 @@ impl DungeonGame {
 
         return true;
     }
-}
 
-impl TerminalHandler for DungeonGame {
-    fn on_draw(&mut self, term: &mut Terminal) -> io::Result<()> {
-        let t = &mut term.stdout;
-        let (w,h) = self.screen.size();
+    fn update_visible(&mut self) {
+        // Mark surroundings as visible and explored
+        let (w,h) = self.tiles.size();
         let (w,h) = (w as i32, h as i32);
 
-        // Mark surroundings as visible and explored
         let (x,y) = self.pos;
-        let mut iter = GraphSearch::<(i32, i32)>::breadth_first((x,y));
-        while let Some(path) = iter.next() {
-            let (mx,my) = path.peek().unwrap().clone();
-            //let dist = (mx - x)*(mx - x) + (my - y)*(my - y);
+        let mut iter = GraphIter::<(i32, i32)>::breadth_first((x,y));
+        while let Some((mx,my)) = iter.next() {
+            let thistile = &mut self.tiles[(mx as usize, my as usize)];
+            thistile.mark_visible();
+
+            if thistile.tile != Tile::Ground || !self.is_visible( (mx,my), self.pos) {
+                continue;
+            }
+
+            let dist = (mx-x)*(mx-x) + (my-y)*(my-y);
+            if dist > 10*10 {
+                continue;
+            }
             
             // Add neighbors
             let mut neighs = [(mx+1,my),(mx,my-1),(mx-1,my),(mx,my+1), (mx+1,my+1),(mx-1,my-1),(mx-1,my+1),(mx+1,my-1)];
             for neigh in neighs {
                 if neigh.0 >= 0 && neigh.0 < w && neigh.1 >= 0 && neigh.1 < h {
-                    let maptile = &mut self.tiles[(neigh.0 as usize, neigh.1 as usize)];
-                    maptile.mark_visible();
-
-                    if maptile.tile == Tile::Ground && self.is_visible( neigh, self.pos) {
-                        iter.push_neighbor(neigh);
-                    }                    
+                    iter.push_neighbor(neigh);
                 }
             }
         }
+    }
+}
 
-        self.draw_map(t)?;
-        //self.screen.clear(t, Color::Black);
-        {
-            
-            self.screen.set(t, (x as usize, y as usize), StyledChar::new('*', Color::Black, Color::Green))?;
+impl TerminalHandler for DungeonGame {
+    fn on_draw(&mut self, term: &mut Terminal) -> io::Result<()> {
+        let t = &mut term.stdout;
+
+        if self.next_level {
+            let mut rng = StdRng::seed_from_u64((self.seed << 32) ^ (self.level as u64));
+
+            self.tiles.clear(MapTile::new(Tile::Void));
+            self.generate_maze(&mut rng);
+            self.open_rooms(&mut rng);
+            self.fill_walls();
+
+            self.next_level = false;
         }
 
-        /*
-        
-        for i in 0..100 {
-            let mut rdnpos = (
-                rng.random_range(0..w),
-                rng.random_range(0..h)
-            );
-            for x in 0..100 {
-                self.screen.set(t, rdnpos, StyledChar::new('.', Color::Black, Color::Green));
-                rdnpos.1 += 1;
-                if rdnpos.1 >= h { break; }
-            }
-        }*/
+        self.update_visible();
+
+        self.draw_map(t)?;
+        //self.screen.set(t, (self.pos.0 as usize * 2, self.pos.1 as usize), StyledChar::new('*', Color::Black, Color::Green))?;
+        self.screen.set(t, (self.pos.0 as usize * 2+1, self.pos.1 as usize), StyledChar::new('*', Color::Black, Color::Green))?;
 
         self.screen.draw(t)?;
 
@@ -331,7 +352,7 @@ impl TerminalHandler for DungeonGame {
 
     fn on_key_event(&mut self, e: &crossterm::event::KeyEvent) {
         let (mut x,mut y) = self.pos;
-        let (w,h) = self.screen.size();
+        let (w,h) = self.tiles.size();
         let (w,h) = (w as i32, h as i32);
         match e.code {
             KeyCode::Left =>  if x > 0 { x -= 1; },
@@ -346,6 +367,10 @@ impl TerminalHandler for DungeonGame {
         if let Some(maptile) = self.tiles.get((x,y)) {
             if maptile.tile == Tile::Ground {
                 self.pos = (x,y);
+            }
+            if maptile.tile == Tile::Stairs {
+                self.next_level = true;
+                self.level += 1;
             }
         }
     }
