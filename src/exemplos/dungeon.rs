@@ -19,33 +19,35 @@ enum Tile {
     WallUJointW,
     WallUJointS,
     WallUJointE,
-    Stairs,
+    StairsUp,
+    StairsDown,
     Ground
 }
 
 impl Tile {
     fn get_chars(&self, back: Color) -> (StyledChar, StyledChar) {
         let b = match self {
-            Tile::Void   => StyledChar::new(' ', back, Color::DarkYellow),
-            Tile::WallV  => StyledChar::new('║', back, Color::DarkYellow),
-            Tile::WallH  => StyledChar::new('═', back, Color::DarkYellow),
-            Tile::WallNE => StyledChar::new('╗', back, Color::DarkYellow),
-            Tile::WallNW => StyledChar::new('╔', back, Color::DarkYellow),
-            Tile::WallSW => StyledChar::new('╚', back, Color::DarkYellow),
-            Tile::WallSE => StyledChar::new('╝', back, Color::DarkYellow),
-            Tile::WallUJointN => StyledChar::new('╦', back, Color::DarkYellow),
-            Tile::WallUJointW => StyledChar::new('╠', back, Color::DarkYellow),
-            Tile::WallUJointS => StyledChar::new('╩', back, Color::DarkYellow),
-            Tile::WallUJointE => StyledChar::new('╣', back, Color::DarkYellow),
-            Tile::WallCross => StyledChar::new('╬', back, Color::DarkYellow),
-            Tile::Stairs => StyledChar::new('⇕', back, Color::Magenta),
-            Tile::Ground => StyledChar::new(' ', back, Color::DarkYellow)
+            Tile::Void   => StyledChar::new(' ', back, Color::Grey),
+            Tile::WallV  => StyledChar::new('║', back, Color::Grey),
+            Tile::WallH  => StyledChar::new('═', back, Color::Grey),
+            Tile::WallNE => StyledChar::new('╗', back, Color::Grey),
+            Tile::WallNW => StyledChar::new('╔', back, Color::Grey),
+            Tile::WallSW => StyledChar::new('╚', back, Color::Grey),
+            Tile::WallSE => StyledChar::new('╝', back, Color::Grey),
+            Tile::WallUJointN => StyledChar::new('╦', back, Color::Grey),
+            Tile::WallUJointW => StyledChar::new('╠', back, Color::Grey),
+            Tile::WallUJointS => StyledChar::new('╩', back, Color::Grey),
+            Tile::WallUJointE => StyledChar::new('╣', back, Color::Grey),
+            Tile::WallCross => StyledChar::new('╬', back, Color::Grey),
+            Tile::StairsUp => StyledChar::new('⬆', back, Color::Magenta),
+            Tile::StairsDown => StyledChar::new('⬇', back, Color::Magenta),
+            Tile::Ground => StyledChar::new(' ', back, Color::Grey)
         };
 
         let a = if self == &Tile::WallH || self == &Tile::WallNE || self == &Tile::WallSE || self == &Tile::WallUJointE || self == &Tile::WallUJointN || self == &Tile::WallUJointS || self == &Tile::WallCross {
-            StyledChar::new('═', back, Color::DarkYellow)
+            StyledChar::new('═', back, Color::Grey)
         } else {
-            StyledChar::new(' ', back, Color::DarkYellow)
+            StyledChar::new(' ', back, Color::Grey)
         };
 
         (a,b)
@@ -105,7 +107,7 @@ struct DungeonGame {
 
     seed: u64,
     level: i32,
-    next_level: bool
+    next_level: i32
 }
 
 impl DungeonGame {
@@ -115,44 +117,23 @@ impl DungeonGame {
             tiles: Vec2D::new(size.0/2, size.1, MapTile::new(Tile::Void)),
             pos: (0,0),
             seed: 0xcafe,
-            level: 0,
-            next_level: true
+            level: -1,
+            next_level: 0
         };
 
         return g;
     }
 
-    /** https://gamedev.stackexchange.com/questions/50570/creating-and-connecting-rooms-for-a-roguelike
-     * 
-     * https://www.reddit.com/r/roguelikedev/comments/99b5fe/original_rogue_1980_duneon_generation/?rdt=51669
-     * https://web.archive.org/web/20131025132021/http://kuoi.org/~kamikaze/GameDesign/art07_rogue_dungeon.php
-     * By Mark Damon Hughes <kamikaze@kuoi.asui.uidaho.edu>
-
-    The original Rogue algorithm is pretty nifty. Any time you need a random dungeon, give this a try:
-
-        1. Divide the map into a grid (Rogue uses 3x3, but any size will work).
-        2. Give each grid a flag indicating if it's "connected" or not, and an array of which grid numbers it's connected to.
-        3. Pick a random room to start with, and mark it "connected".
-        4. While there are unconnected neighbor rooms, connect to one of them, make that the current room, mark it "connected", and repeat.
-        5. While there are unconnected rooms, try to connect them to a random connected neighbor (if a room has no connected neighbors yet, just keep cycling, you'll fill out to it eventually).
-        6. All rooms are now connected at least once.
-        7. Make 0 or more random connections to taste; I find rnd(grid_width) random connections looks good.
-        8. Draw the rooms onto the map, and draw a corridor from the center of each room to the center of each connected room, changing wall blocks into corridors. If your rooms fill most or all of the space of the grid, your corridors will very short - just holes in the wall.
-        9. Scan the map for corridor squares with 2 bordering walls, 1-2 bordering rooms, and 0-1 bordering corridor, and change those to doors.
-        10. Place your stairs up in the first room you chose, and your stairs down in the last room chosen in step 5. This will almost always be a LONG way away.
-        11. All done!
-
-    Rogue also has "gone rooms", which just put a corridor space instead of the room, and draws L-shaped corridors instead of straight lines, but those are just flavor.
-
-    This algorithm also has the virtues of being extremely fast (even on MUCH bigger grid arrays than 3x3), and guaranteed to succeed.
-    */
-    fn open_rooms(&mut self, rng: &mut StdRng) {
+    fn open_rooms(&mut self, rng: &mut StdRng, spawn_start: bool) {
         let (w,h) = self.tiles.size();
 
+        let mut rooms: Vec<((usize,usize),(usize,usize))> = Vec::new();
+        let mut room_biggest = 0;
+        let mut room_biggest_sz = 0;
         let max_room_size = 12;
-        // Em média 4/5 dos espaços serão labirinto e o resto salas
-        let max_room_count = 1 + ((w*h) / ((max_room_size/2)*(max_room_size/2))) / 5;
-        for room in 0..max_room_count {
+        // Em média 7/8 dos espaços serão labirinto e o resto salas (no mínimo 2 salas)
+        let max_room_count = 2 + ((w*h) / ((max_room_size/2)*(max_room_size/2))) / 8;
+        for iter in 0..10000 {
             let sz = (
                 rng.random_range(4..max_room_size),
                 rng.random_range(4..max_room_size)
@@ -165,19 +146,59 @@ impl DungeonGame {
 
             let mut start = (pos.0 - sz.0/2, pos.1 - sz.1/2);
             let mut end = (pos.0 + sz.0/2, pos.1 + sz.1/2);
+            let dim = (start,end);
 
+            // verificar se já não tem uma sala colidindo
+            let mut collided = false;
+            for other in rooms.iter() {
+                if !(dim.0.0 > other.1.0 || dim.1.0 < other.0.0
+                ||   dim.0.1 > other.1.1 || dim.1.1 < other.0.1
+                 ) {
+                    collided = true;
+                    break;
+                }
+            }
+            if collided {
+                continue;
+            }
+            
+            rooms.push(dim);
             for x in start.0..end.0 {
                 for y in start.1..end.1 {
                     self.tiles[(x,y)].tile = Tile::Ground;
                 }
             }
 
-            let center = ((start.0 + end.0)/2, (start.1 + end.1)/2);
-            self.pos = (center.0 as i32,center.1 as i32);
-
-            if room == 0 {
-                self.tiles[center].tile = Tile::Stairs;
+            let room_sz = sz.0 * sz.1;
+            if room_sz > room_biggest_sz {
+                room_biggest = rooms.len()-1;
+                room_biggest_sz = room_sz;
             }
+
+            if rooms.len() >= max_room_count {
+                break;
+            }
+        }
+
+        // put spawn in the biggest room
+        let room_spawn = rooms[room_biggest];
+        let center_start = ((room_spawn.0.0 + room_spawn.1.0)/2, (room_spawn.0.1 + room_spawn.1.1)/2);
+        if self.next_level > 0 {
+            self.tiles[center_start].tile = Tile::StairsUp;
+        }
+        // put stairs in a random room
+        let mut room_stairs_i = rng.random_range(0..rooms.len());
+        if room_stairs_i == room_biggest {
+            room_stairs_i = (room_stairs_i + 1) % rooms.len();
+        }
+        let room_stairs = rooms[room_stairs_i];
+        let center_end = ((room_stairs.0.0 + room_stairs.1.0)/2, (room_stairs.0.1 + room_stairs.1.1)/2);
+        self.tiles[center_end].tile = Tile::StairsDown;
+
+        if spawn_start {
+            self.pos = (center_start.0 as i32,center_start.1 as i32);
+        } else {
+            self.pos = (center_end.0 as i32,center_end.1 as i32);
         }
     }
 
@@ -236,19 +257,19 @@ impl DungeonGame {
             let screen_pos_b = (pos.0 * 2 + 1, pos.1);
 
             if !maptile.explored {
-                self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::Grey, Color::DarkYellow))?;
-                self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::Grey, Color::DarkYellow))?;
+                self.screen.set(t, screen_pos_a, StyledChar::new('█', Color::Black, Color::DarkGrey))?;
+                self.screen.set(t, screen_pos_b, StyledChar::new('█', Color::Black, Color::DarkGrey))?;
             } else {
                 if tile == Tile::Ground {
                     if maptile.visible {
-                        self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::Black, Color::DarkYellow))?;
-                        self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::Black, Color::DarkYellow))?;
+                        self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::Black, Color::DarkGrey))?;
+                        self.screen.set(t, screen_pos_b, StyledChar::new('.', Color::Black, Color::White))?;
                     } else {
-                        self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::DarkGrey, Color::DarkYellow))?;
-                        self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::DarkGrey, Color::DarkYellow))?;
+                        self.screen.set(t, screen_pos_a, StyledChar::new(' ', Color::Black, Color::DarkGrey))?;
+                        self.screen.set(t, screen_pos_b, StyledChar::new(' ', Color::Black, Color::DarkGrey))?;
                     }
                 } else {
-                    let (ca, cb) = tile.get_chars(if maptile.visible { Color::Black } else { Color::DarkGrey });
+                    let (ca, cb) = tile.get_chars(Color::Black);
                     self.screen.set(t, screen_pos_a, ca)?;
                     self.screen.set(t, screen_pos_b, cb)?;
                 }
@@ -328,22 +349,22 @@ impl TerminalHandler for DungeonGame {
     fn on_draw(&mut self, term: &mut Terminal) -> io::Result<()> {
         let t = &mut term.stdout;
 
-        if self.next_level {
-            let mut rng = StdRng::seed_from_u64((self.seed << 32) ^ (self.level as u64));
+        if self.level != self.next_level {
+            let mut rng = StdRng::seed_from_u64((self.seed << 32) ^ (self.next_level as u64));
 
             self.tiles.clear(MapTile::new(Tile::Void));
             self.generate_maze(&mut rng);
-            self.open_rooms(&mut rng);
+            self.open_rooms(&mut rng, self.next_level > self.level);
             self.fill_walls();
 
-            self.next_level = false;
+            self.level = self.next_level;
         }
 
         self.update_visible();
 
         self.draw_map(t)?;
         //self.screen.set(t, (self.pos.0 as usize * 2, self.pos.1 as usize), StyledChar::new('*', Color::Black, Color::Green))?;
-        self.screen.set(t, (self.pos.0 as usize * 2+1, self.pos.1 as usize), StyledChar::new('*', Color::Black, Color::Green))?;
+        self.screen.set(t, (self.pos.0 as usize * 2+1, self.pos.1 as usize), StyledChar::new('@', Color::Black, Color::Green))?;
 
         self.screen.draw(t)?;
 
@@ -368,9 +389,11 @@ impl TerminalHandler for DungeonGame {
             if maptile.tile == Tile::Ground {
                 self.pos = (x,y);
             }
-            if maptile.tile == Tile::Stairs {
-                self.next_level = true;
-                self.level += 1;
+            if maptile.tile == Tile::StairsUp {
+                self.next_level = self.level - 1;
+            }
+            if maptile.tile == Tile::StairsDown {
+                self.next_level = self.level + 1;
             }
         }
     }
