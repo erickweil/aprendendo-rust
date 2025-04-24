@@ -5,7 +5,21 @@
 **Livros**
 - https://rust-book.cs.brown.edu/ - The Rust Programming Language (Experiment, interactive)
 - https://rust-unofficial.github.io/too-many-lists/ Learn Rust With Entirely Too Many Linked Lists (Linked List in rust Overview)
+- https://rust-lang.github.io/async-book/ Async Book (Guide to asynchronous programming in Rust)
+- https://doc.rust-lang.org/nomicon/ The Rustonomicon (The Dark Arts of Unsafe Rust)
+- ? Rust Atomics and Locks - by @m_ou_se
+- ? Rust in Action - by @timClicks
+- ? Zero to production in Rust - by @algo_luca
+- ? Rust for Rustaceans - by @jonhoo
+
+**Blogs**
+- https://os.phil-opp.com/ - Writing a OS in Rust
+
+**Prática**
+- https://github.com/rust-lang/rustlings Exercícios práticos para aprender Rust
 - https://practice.course.rs/why-exercise.html Rust By Practice (Practice Rust with challenging examples, exercises and projects)
+- https://doc.rust-lang.org/rust-by-example/ Rust By Example (Learn Rust with examples)
+
 
 **Youtube**
 - **Tech With Tim** https://www.youtube.com/watch?v=T_KrYLW4jw8 (Série de vídeos descontinuada)

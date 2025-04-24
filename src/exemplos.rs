@@ -21,3 +21,6 @@ pub use expression::*;
 
 mod dungeon;
 pub use dungeon::*;
+
+mod sudoku;
+pub use sudoku::*;

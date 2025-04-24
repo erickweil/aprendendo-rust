@@ -25,6 +25,7 @@ fn main() {
             println!("- minesweeper");
             println!("- expression");
             println!("- dungeon");
+            println!("- sudoku");
             
             escolha = leia(">").to_lowercase();
         }
@@ -51,6 +52,8 @@ fn main() {
                 exemplos::expression();
             } else if escolha == "dungeon" {
                 exemplos::dungeon();
+            } else if escolha == "sudoku" {
+                exemplos::sudoku();
             } else {
                 println!("Nenhum programa com este nome '{}'", escolha);
             }
