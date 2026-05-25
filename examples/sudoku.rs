@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::estruturas::Vec2D;
+use basico::estruturas::Vec2D;
 
 pub struct QuadroSudoku {
     table: [usize; 81]
@@ -178,8 +178,7 @@ impl PencilMark<9> for QuadroSudoku {
 }
 
 
-pub fn sudoku() {
-
+fn main() {
     let mut table = QuadroSudoku::from_slice(&[
         0, 8, 0,   0, 5, 0,   0, 2, 0,
         3, 0, 5,   0, 0, 0,   1, 0, 6,

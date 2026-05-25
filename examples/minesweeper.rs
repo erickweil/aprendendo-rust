@@ -1,10 +1,10 @@
 use std::{clone, collections::HashSet, io::{self, Stdout}, mem};
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 use crossterm::{cursor::*, event::*, queue, style::*, terminal::{self, Clear, ClearType}, ExecutableCommand, QueueableCommand};
 
-use crate::{estruturas::{Dir, GraphIter, GraphIterState, Iterator2D, Vec2D}, utils::{Terminal, TerminalHandler}};
+use basico::{estruturas::{Dir, GraphIter, GraphIterState, Iterator2D, Vec2D}, utils::{Terminal, TerminalHandler}};
 
 #[derive(Clone)]
 enum GradeCell {
@@ -401,7 +401,7 @@ fn setup_terminal() -> io::Result<()> {
     Ok(())
 }
 
-pub fn mine_sweeper() {
+fn main() {
     match setup_terminal() {
         Ok(_) => {
             println!();

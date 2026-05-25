@@ -1,10 +1,10 @@
 use std::io;
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 use crossterm::{cursor::MoveTo, event::KeyCode, style::{Color, Print, SetBackgroundColor, SetForegroundColor}, terminal::{size, DisableLineWrap, EnableLineWrap}, ExecutableCommand, QueueableCommand};
 
-use crate::{estruturas::{Dir, LinkedList, Queue}, utils::{Terminal, TerminalHandler}};
+use basico::{estruturas::{Dir, LinkedList, Queue}, utils::{Terminal, TerminalHandler}};
 struct Snake {
     prev_tail: (i32,i32),
     body: LinkedList<(i32,i32)>,
@@ -206,7 +206,7 @@ fn setup_terminal() -> io::Result<()> {
     Ok(())
 }
 
-pub fn snake() {
+fn main() {
     match setup_terminal() {
         Ok(_) => {
             println!();

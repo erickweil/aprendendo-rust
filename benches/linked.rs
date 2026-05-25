@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use basico::{Queue, Stack};
+use basico::estruturas::{Queue, Stack, LinkedList};
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use rand::{rng, Rng};
 
@@ -22,7 +22,7 @@ fn linked_list(c: &mut Criterion) {
     let mut g = c.benchmark_group("Linked");
     g.bench_function("Linked Pool", |b| {
         b.iter_batched_ref(
-            || basico::LinkedList::new(),
+            || LinkedList::new(),
             |i| {
                 for a in 0..size {
                     i.add_last(a);

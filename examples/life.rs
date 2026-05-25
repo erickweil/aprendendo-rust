@@ -4,7 +4,8 @@ use std::mem;
 use crossterm::{cursor::*, event::KeyCode, style::*, terminal::*, ExecutableCommand, QueueableCommand};
 use rand::Rng;
 
-use crate::{estruturas::Vec2D, utils::{Terminal, TerminalHandler}};
+use basico::{estruturas::Vec2D, utils::{Terminal, TerminalHandler}};
+use rand::RngExt;
 
 fn wrap_xy((x,y): (i32,i32), (w,h): (usize,usize)) -> (usize,usize) {
     (
@@ -203,7 +204,7 @@ fn setup_terminal() -> io::Result<()> {
     Ok(())
 }
 
-pub fn life() {
+fn main() {
     match setup_terminal() {
         Ok(_) => {
             println!();

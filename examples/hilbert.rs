@@ -1,5 +1,5 @@
-use crate::utils::leia;
-use crate::estruturas::{Dir, Vec2D};
+use basico::utils::leia;
+use basico::estruturas::{Dir, Vec2D};
 
 /**
 https://en.wikipedia.org/wiki/Hilbert_curve
@@ -104,7 +104,7 @@ fn get_line_char(prev: Dir, next: Dir) -> char {
     }
 }
 
-pub fn hilbert() {
+fn main() {
     let input = leia("Qual a profundidade da curva de Hilbert? (padrão 3)\n>");
     let profundidade: i32 = input.parse::<i32>().unwrap_or(3);
 

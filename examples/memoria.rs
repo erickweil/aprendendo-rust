@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 
 /**
  * Regras de Ownership:
@@ -8,7 +10,7 @@
  * Regras de referências &:
  * 1- Só pode ter uma referência mutável, ou várias referências imutáveis, mas não os dois
  */
-pub fn memoria() {
+fn main() {
 
     // PRIMITIVOS
     // -------------------
@@ -44,6 +46,10 @@ pub fn memoria() {
     // Passando o dono
     roubar(texto);
 
+    // Rc<str>
+    let texto_arc: Rc<str> = Rc::from("Texto em Arc");
+    emprestar(&texto_arc.as_ref());
+
     // println!("{}",texto); ERR -> borrow of moved value: `texto`, value borrowed here after move
 }
 
@@ -57,7 +63,7 @@ pub fn swap(a: &mut i32, b: &mut i32) {
  * Borrowing
  * Apenas é dono da variável durante a execução da função
  */
-pub fn emprestar(texto: &String) {
+pub fn emprestar(texto: &str) {
     println!("Peguei emprestado só o texto... {}", texto);
 }
 

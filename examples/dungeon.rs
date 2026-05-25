@@ -1,9 +1,9 @@
 use std::{cmp::{max, min}, io::{self, Stdout}};
 
 use crossterm::{cursor::*, event::KeyCode, style::*, terminal::*, ExecutableCommand, QueueableCommand};
-use rand::{rngs::{StdRng, ThreadRng}, seq::SliceRandom, Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng, rngs::{StdRng, ThreadRng}, seq::SliceRandom};
 
-use crate::{estruturas::{Dir, GraphIter, GraphIterState, GraphSearch, Stack, Vec2D}, utils::{StyledChar, Terminal, TerminalHandler, TerminalScreen}};
+use basico::{estruturas::{Dir, GraphIter, GraphIterState, GraphSearch, Stack, Vec2D}, utils::{StyledChar, Terminal, TerminalHandler, TerminalScreen}};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tile {
@@ -414,7 +414,7 @@ fn setup_terminal() -> io::Result<()> {
     Ok(())
 }
 
-pub fn dungeon() {
+fn main() {
     match setup_terminal() {
         Ok(_) => {
             println!();

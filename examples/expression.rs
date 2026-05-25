@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::{self, write, Error}, io::Result, num::Pars
 
 use rustyline::{error::ReadlineError, history::FileHistory, DefaultEditor, Editor};
 
-use crate::{estruturas::Dir, utils::leia};
+use basico::{estruturas::Dir, utils::leia};
 
 #[derive(PartialEq)]
 #[derive(Clone)]
@@ -486,7 +486,7 @@ impl StackMachine {
     }
 }
 
-pub fn expression() {
+fn main() {
     // `()` can be used when no completer is required
     let mut rl = DefaultEditor::new().unwrap();
 

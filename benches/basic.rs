@@ -1,9 +1,9 @@
 // Copiado e editado de: https://github.com/spersson/bvmap/tree/master
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use rand::{rng, Rng};
+use rand::{Rng, RngExt, rng};
 use slotmap::{DefaultKey, DenseSlotMap, HopSlotMap, SlotMap};
-use basico::VecPool;
+use basico::estruturas::VecPool;
 
 fn inserts(c: &mut Criterion) {
     let size = 10_000;

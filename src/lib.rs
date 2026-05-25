@@ -1,3 +1,2 @@
-
-mod estruturas;
-pub use estruturas::*;
+pub mod estruturas;
+pub mod utils;
