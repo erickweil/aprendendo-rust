@@ -178,7 +178,7 @@ impl<T> LinkedList<T> {
         }
     }
 
-    pub fn iter(&self) -> LinkedListIter<T> {
+    pub fn iter(&self) -> LinkedListIter<'_, T> {
         LinkedListIter { 
             pool: &self.arr,
             atual: self.arr.get_node(self.first)

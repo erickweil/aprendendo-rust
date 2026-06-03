@@ -3,7 +3,7 @@ use std::io::{self, Write};
 pub fn leia(prompt: &str) -> String {
     print!("{}", prompt);
     
-    io::stdout().flush();
+    io::stdout().flush().expect("Erro ao fazer flush");
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Erro ao ler terminal");

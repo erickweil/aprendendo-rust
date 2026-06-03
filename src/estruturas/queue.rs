@@ -51,7 +51,7 @@ impl<T> DoubleStackQueue<T> {
         return ret;
     }
 
-    pub fn iter(&self) -> DoubleStackQueueIterator<T> {
+    pub fn iter(&self) -> DoubleStackQueueIterator<'_, T> {
         DoubleStackQueueIterator { queue: &self, index: 0 }
     }
 

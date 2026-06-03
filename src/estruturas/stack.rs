@@ -66,7 +66,7 @@ impl<T> LinkedStack<T> {
         Rc::new(Node { value: value, next: next })
     }
 
-    pub fn iter(&self) -> LinkedStackIter<T> {
+    pub fn iter(&self) -> LinkedStackIter<'_, T> {
         LinkedStackIter { 
             atual: self.head.as_ref()
         }

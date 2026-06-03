@@ -19,7 +19,7 @@ impl<T> Vec2D<T> where T: Clone {
         }
     }
 
-    pub fn values(&self) -> Iter<T> {
+    pub fn values(&self) -> Iter<'_, T> {
         return self.data.iter();
     }
 
