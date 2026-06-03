@@ -11,6 +11,7 @@ unsafe_code = "forbid"
 
 [dependencies]
 crossterm = "0.29.0"
+oneshot = { version = "0.2.1", features = ["std"] }
 rand = "0.10.1"
 rustyline = "18.0.0"
 
