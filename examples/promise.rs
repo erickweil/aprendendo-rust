@@ -1,36 +1,35 @@
-use std::io;
-
+use std::{cell::RefCell, io, rc::Rc, thread};
 use basico::promise::*;
 
-fn esperar(ms: u64) -> Promise<()> {
-    Promise::new(move |e| {
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-            e.resolve(());
+fn main() {
+    let mut counter = Rc::new(RefCell::new(0));
+
+    let counter_clone = counter.clone();
+    EventLoop::start(move || {
+        EventLoop::set_interval(move || {
+            let mut counter = counter_clone.borrow_mut();
+
+            println!("SetInterval 1s... Counter: {}", *counter);
+            *counter += 1;
+
+            // Parar o loop após 3 execuções
+            Ok(*counter < 3)
+        }, 1000)?;
+
+        Promise::new(move |e| {
+            EventLoop::set_timeout(move || {
+                e.resolve(());
+                Ok(())
+            }, 5000).unwrap();
+        }).then(move |_| {
+            println!("Promise após 5s...");
+
+            Promise::Resolved(())
         });
-    })
-}
 
-fn executar() -> Promise<()> {
-    println!("Contando...");
-    esperar(1000).then(move |_| {
-        println!("1...");
-        esperar(1000)
-    }).then(move |_| {
-        println!("2...");
-        esperar(1000)
-    }).then(move |_| {
-        println!("3...");
-        esperar(1000)
-        //Promise::reject(Box::new(io::Error::other("Erro na contagem!")))
-    }).finally(move || {
-        println!("Contagem finalizada!");
-    })
-}
+        println!("Fim EventLoop::start()...");
+        Ok(())
+    }).unwrap();
 
-fn main() -> Result<(), Error> {
-    let result = Promise::wait_blocking(executar())?;
-    println!("Tudo terminou! {:?}", result);
-
-    Ok(())
+    println!("Fim main! Counter: {}", *counter.borrow());
 }
