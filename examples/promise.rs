@@ -6,29 +6,30 @@ fn main() {
 
     let counter_clone = counter.clone();
     EventLoop::start(move || {
-        EventLoop::set_interval(move || {
+        EventLoop::set_interval(move |interval_id| {
             let mut counter = counter_clone.borrow_mut();
 
             println!("SetInterval 1s... Counter: {}", *counter);
             *counter += 1;
 
             // Parar o loop após 3 execuções
-            Ok(*counter < 3)
-        }, 1000)?;
+            if *counter >= 3 {
+                println!("Parando o loop após 3 execuções...");
+                EventLoop::clear_timeout(interval_id).unwrap();
+            }
+        }, 1000).unwrap();
 
         Promise::new(move |e| {
+            println!("Agendando setTimeout de 5s...");
             EventLoop::set_timeout(move || {
                 e.resolve(());
-                Ok(())
             }, 5000).unwrap();
         }).then(move |_| {
-            println!("Promise após 5s...");
-
+            println!("Encerrado setTimeout após 5s...");
             Promise::Resolved(())
         });
 
         println!("Fim EventLoop::start()...");
-        Ok(())
     }).unwrap();
 
     println!("Fim main! Counter: {}", *counter.borrow());

@@ -1,8 +1,6 @@
 use std::{io, result, sync::{Arc, Mutex}};
 
-use crate::promise::EventLoop;
-
-pub type Error = Box<dyn std::error::Error + Send + 'static>;
+use crate::promise::{Error, EventLoop};
 
 pub struct PromiseResolveReject<T> {
     tx: oneshot::Sender<Result<T, Error>>
@@ -19,7 +17,7 @@ impl<T> PromiseResolveReject<T> {
 }
 
 /// Promessa com comportamento similar ao JavaScript, singlethreaded rodando no EventLoop (Deve estar dentro de EventLoop::start)
-/// A promessa inicia o processamento IMEDIATAMENTE na thread do event loop.
+/// A promessa inicia o processamento IMEDIATAMENTE de forma síncrona
 /// Não existe resolve e reject separados, é uma struct com os métodos
 /// Você pode chamar resolve ou reject de outra thread, mas se criar a promessa em outra thread produz uma promessa já rejeitada
 pub enum Promise<T> {
@@ -34,14 +32,8 @@ impl<T: Send + 'static> Promise<T> {
         C: FnOnce(PromiseResolveReject<T>) + 'static,
     {
         let (tx, rx) = oneshot::channel::<Result<T, Error>>();
-        // A promessa inicia o processamento IMEDIATAMENTE em uma nova thread
-        // Eu sei que JS não faz assim mas uma coisa por vez né (Futuramente colocar esse processamento em outro lugar?)
-        if let Err(e) = EventLoop::spawn(move || {
-            run(PromiseResolveReject { tx });
-            Ok(())
-        }) {
-            return Self::Rejected(e);
-        }
+        // A promessa inicia o processamento IMEDIATAMENTE de forma síncrona
+        run(PromiseResolveReject { tx });
 
         Self::Pending(rx)
     }
@@ -73,7 +65,7 @@ impl<T: Send + 'static> Promise<T> {
                             Ok(v) => tx.send(Ok(v)).ok(),
                             Err(err) => tx.send(Err(err)).ok(),
                         };
-                    });
+                    }).unwrap();
                 }) {
                     return Promise::Rejected(e);
                 }
@@ -140,20 +132,21 @@ impl<T: Send + 'static> Promise<T> {
             }
             Self::Pending(rx) => { 
                 let mut f = Some(f);
-                EventLoop::set_interval(move || {
+                EventLoop::set_interval(move |interval_id| {
                     match rx.try_recv() {
                         Ok(result) => {
                             f.take().unwrap()(result);
-                            Ok(false) // Stop the interval
+                            // Stop the interval
+                            EventLoop::clear_timeout(interval_id).ok();
                         },
                         Err(oneshot::TryRecvError::Empty) => {
                             // Not ready yet, keep waiting
-                            Ok(true)
                         },
                         Err(oneshot::TryRecvError::Disconnected) => {
                             // The original promise was dropped without resolving or rejecting
                             f.take().unwrap()(Err(Box::new(io::Error::new(io::ErrorKind::Other, "Original promise was dropped"))));
-                            Ok(false) // Stop the interval
+                            // Stop the interval
+                            EventLoop::clear_timeout(interval_id).ok();
                         }
                     }
                 }, 1)?;
