@@ -106,19 +106,6 @@ impl<T: Send + 'static> Promise<T> {
         })
     }
 
-    pub fn wait_blocking(self) -> Result<T, Error> {
-        match self {
-            Self::Resolved(value) => Ok(value),
-            Self::Rejected(err) => Err(err),
-            Self::Pending(rx) => { 
-                match rx.recv() {
-                    Ok(value) => value,
-                    Err(err) => Err(Box::new(err)),
-                }
-            }
-        }
-    }
-
     pub fn wait_event_loop<F>(self, f: F) -> Result<(), Error>
     where
         F: FnOnce(Result<T, Error>) + 'static,

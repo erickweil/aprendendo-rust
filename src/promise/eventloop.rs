@@ -115,7 +115,9 @@ impl EventLoop {
                     std::thread::sleep(std::time::Duration::from_millis(4));
                 } else {
                     // Nothing to do, stopping the event loop
-                    EventLoop::stop();
+                    INSTANCE.with_borrow_mut(|instance| {
+                        *instance = EventLoop::Stopped;
+                    });
                     
                     return Ok(());
                 }
@@ -123,12 +125,13 @@ impl EventLoop {
         }
     }
 
-    /// Clear all pending tasks and stop the event loop
+    /// Clear all pending tasks to gracefully stop the event loop
     pub fn stop() {
         // println!("Stopping event loop...");
-        INSTANCE.with_borrow_mut(|instance| {
-            *instance = EventLoop::Stopped;
-        });
+        EventLoop::with_running(|e| {
+            e.task_queue.clear();
+            e.timeout_queue.clear();
+        }).unwrap();
     }
 
     /// Spawn a task to be executed by the event loop
@@ -192,5 +195,141 @@ impl EventLoop {
         EventLoop::with_running(|e| {
             e.task_queue.push_front(Box::new(f));
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use super::*;
+
+    #[derive(Clone, Debug)]
+    struct TestCounter {
+        count: Arc<Mutex<u64>>,
+    }
+
+    impl TestCounter {
+        fn new() -> Self {
+            Self { count: Arc::new(Mutex::new(0)) }
+        }
+
+        fn increment(&self) -> u64 {
+            let mut count = self.count.lock().unwrap();
+            *count += 1;
+            *count
+        }
+    }
+
+    impl PartialEq for TestCounter {
+        fn eq(&self, other: &Self) -> bool {
+            *self.count.lock().unwrap() == *other.count.lock().unwrap()
+        }
+    }
+
+
+    #[test]
+    fn test_spawn() {
+        let counter = TestCounter::new();
+        assert_eq!(counter.increment(), 1);
+
+        let _counter = counter.clone();
+        EventLoop::start(move || {
+            assert_eq!(_counter.increment(), 2);
+
+            let __counter = _counter.clone();
+            EventLoop::spawn(move || {
+                assert_eq!(__counter.increment(), 4);
+            }).unwrap();
+
+            let __counter = _counter.clone();
+            EventLoop::spawn(move || {
+                assert_eq!(__counter.increment(), 5);
+            }).unwrap();
+
+            assert_eq!(_counter.increment(), 3);
+        }).unwrap();
+
+        assert_eq!(counter.increment(), 6);
+    }
+
+    #[test]
+    fn test_timeout() {
+        EventLoop::start(|| {
+            let counter = TestCounter::new();
+
+            let timeout_id = EventLoop::set_timeout(move || {
+                panic!("This timeout should have been cleared!");
+            }, 0).unwrap();
+
+            let _counter = counter.clone();
+            EventLoop::set_timeout(move || {
+                assert_eq!(_counter.increment(), 5);
+            }, 1).unwrap();
+            
+            let _counter = counter.clone();
+            EventLoop::set_timeout(move || {
+                assert_eq!(_counter.increment(), 3);
+            }, 0).unwrap();
+
+            let _counter = counter.clone();
+            EventLoop::set_timeout(move || {
+                assert_eq!(_counter.increment(), 4);
+            }, 0).unwrap();
+
+            let _counter = counter.clone();
+            EventLoop::spawn(move || {
+                assert_eq!(_counter.increment(), 2);
+            }).unwrap();
+
+            assert_eq!(counter.increment(), 1);
+
+            EventLoop::clear_timeout(timeout_id).unwrap();
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_interval() {
+        let counter = TestCounter::new();
+
+        EventLoop::start(|| {
+            let _counter = counter.clone();  
+            EventLoop::set_interval(move |id| {
+                let count = _counter.increment();
+                if count == 5 {
+                    EventLoop::clear_timeout(id).unwrap();
+                }
+            }, 1).unwrap();
+
+            assert_eq!(counter.increment(), 1);
+        }).unwrap();
+
+        assert_eq!(counter.increment(), 6);
+    }
+
+    #[test]
+    fn test_microtask_recursive() {
+        // This recursive spawning should not cause stack overflow
+        // also it will only run set_timeout (Macrotask) after all the recursive spawns (Microtask)
+        fn recursive_fn(counter: TestCounter) {
+            if counter.increment() > 100000 {
+                return;
+            }
+            EventLoop::spawn(|| {
+                recursive_fn(counter);
+            }).unwrap();
+        }
+
+        let counter = TestCounter::new();
+        EventLoop::start(|| {
+            let _counter = counter.clone();
+            recursive_fn(_counter);
+
+            let _counter = counter.clone();
+            EventLoop::set_timeout(move || {
+                assert_eq!(_counter.increment(), 100002);
+            }, 0);
+        }).unwrap();
+
+        assert_eq!(counter.increment(), 100003);
     }
 }
