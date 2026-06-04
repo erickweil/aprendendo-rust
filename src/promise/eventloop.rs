@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::{BTreeMap, BinaryHeap, VecDeque}, io, sync::{Mutex, MutexGuard, mpsc}};
+use std::{cell::RefCell, collections::{BTreeMap, BinaryHeap, VecDeque}, io, sync::{Mutex, MutexGuard, mpsc}, time::{Duration, Instant}};
 
 pub type Error = Box<dyn std::error::Error + Send + 'static>;
 pub fn new_error(msg: impl Into<String>) -> Error {
@@ -83,17 +83,17 @@ impl EventLoop {
             } else {
                 // Now check and run a timeout (they're ordered)
                 let now = std::time::Instant::now();
-                let (timeout, has_next) = EventLoop::with_running(|e| {
+                let (timeout, time_next) = EventLoop::with_running(|e| {
                     let Some(mut entry) = e.timeout_queue.first_entry() else {
-                        return (None, false);
+                        return (None, None);
                     };
                     if entry.key().0 > now {
-                        return (None, true);
+                        return (None, Some(entry.key().0 - now));
                     }
 
                     let key = entry.key().clone();
                     let item = entry.remove();
-                    (Some((key, item)), true)
+                    (Some((key, item)), None)
                 })?;
 
                 if let Some((timeout_key, timeout_item)) = timeout {
@@ -110,9 +110,13 @@ impl EventLoop {
                             })?;
                         },
                     }
-                } else if has_next {
+                } else if let Some(time_next) = time_next {
                     // Some more tasks, sleep for a bit to avoid busy waiting
-                    std::thread::sleep(std::time::Duration::from_millis(4));
+                    if time_next > Duration::from_millis(4) {
+                        std::thread::sleep(Duration::from_millis(4));
+                    } else {
+                        std::thread::sleep(time_next);
+                    }
                 } else {
                     // Nothing to do, stopping the event loop
                     INSTANCE.with_borrow_mut(|instance| {

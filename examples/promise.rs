@@ -1,5 +1,5 @@
 use std::{cell::RefCell, io, rc::Rc, thread};
-use basico::promise::{promise::Promise, *};
+use basico::promise::{promise::{Promise}, *};
 
 fn main() {
     let mut counter = Rc::new(RefCell::new(0));
@@ -33,7 +33,7 @@ fn main() {
 
             EventLoop::stop();
 
-            Promise::Resolved(())
+            Promise::resolve(())
         });
 
         println!("Fim EventLoop::start()...");
