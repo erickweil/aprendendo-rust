@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::{BTreeMap, BinaryHeap, VecDeque}, io, sync::{Mutex, MutexGuard, mpsc}, time::{Duration, Instant}};
+use std::{cell::RefCell, collections::{BTreeMap, BinaryHeap, HashMap, VecDeque}, io, sync::{Mutex, MutexGuard, OnceLock, mpsc}, time::{Duration, Instant}};
 
 pub type Error = Box<dyn std::error::Error + Send + 'static>;
 pub fn new_error(msg: impl Into<String>) -> Error {
@@ -21,6 +21,7 @@ pub enum TimeoutQueueItem {
 pub struct EventLoopStruct {
     task_queue: VecDeque<Box<dyn FnOnce() + 'static>>,
     timeout_queue: BTreeMap<TimeoutQueueKey, TimeoutQueueItem>,
+    paused_tasks: HashMap<u64, Box<dyn FnOnce() + 'static>>,
     timeout_counter: u64,
 }
 
@@ -38,6 +39,10 @@ thread_local! {
         RefCell::new(EventLoop::Uninitialized)
     };
 }
+
+/// A channel that allows tasks to be spawned from other threads to the event loop thread
+static REMOTE_SPAWNER: OnceLock<mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>> = OnceLock::new();
+
 impl EventLoop {
     pub fn with_running<R>(f: impl FnOnce(&mut EventLoopStruct) -> R) -> Result<R, Error> {
         INSTANCE.with_borrow_mut(|instance| {
@@ -51,13 +56,14 @@ impl EventLoop {
     /// Start the event loop, running indefinitely until the program is terminated
     /// This function should be called once and it will block the thread it's called on
     /// panics if called while the event loop is already running or stopped
-    pub fn start(first_task: impl FnOnce()) -> Result<(), Error> {
+    pub fn start(first_task: impl FnOnce()) -> Result<(), Error> {        
         // Initialize the event loop
         INSTANCE.with_borrow_mut(|instance| {
             if let EventLoop::Uninitialized = instance {
                 *instance = EventLoop::Running(EventLoopStruct {
                     task_queue: VecDeque::new(),
                     timeout_queue: BTreeMap::new(),
+                    paused_tasks: HashMap::new(),
                     timeout_counter: 0,
                 });
                 return Ok(());
@@ -65,6 +71,10 @@ impl EventLoop {
                 return Err(new_error("Event loop is already running or stopped!"));
             }
         })?;
+
+        // Initialize the remote spawner channel
+        let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
+        REMOTE_SPAWNER.set(tx).map_err(|_| new_error("Failed to set remote spawner channel!"))?;
 
         // run the first task
         first_task();
@@ -111,19 +121,33 @@ impl EventLoop {
                         },
                     }
                 } else if let Some(time_next) = time_next {
-                    // Some more tasks, sleep for a bit to avoid busy waiting
-                    if time_next > Duration::from_millis(4) {
-                        std::thread::sleep(Duration::from_millis(4));
-                    } else {
-                        std::thread::sleep(time_next);
+                    // Wait until the next timer or until a remote task is spawned, whichever comes first
+                    if let Ok(remote_task) = rx.recv_timeout(time_next) {
+                        EventLoop::with_running(|e| {
+                            e.task_queue.push_back(remote_task);
+                        })?;
                     }
                 } else {
-                    // Nothing to do, stopping the event loop
-                    INSTANCE.with_borrow_mut(|instance| {
-                        *instance = EventLoop::Stopped;
-                    });
-                    
-                    return Ok(());
+                    // Check paused tasks 
+                    let has_paused_tasks = EventLoop::with_running(|e| {
+                        !e.paused_tasks.is_empty()
+                    })?;
+
+                    if has_paused_tasks {
+                        // If there are paused tasks, block waiting for a remote task to resume them
+                        if let Ok(remote_task) = rx.recv() {
+                            EventLoop::with_running(|e| {
+                                e.task_queue.push_back(remote_task);
+                            })?;
+                        }
+                    } else {
+                        // Nothing to do, stopping the event loop
+                        INSTANCE.with_borrow_mut(|instance| {
+                            *instance = EventLoop::Stopped;
+                        });
+                        
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -146,6 +170,19 @@ impl EventLoop {
         EventLoop::with_running(|e| {
             e.task_queue.push_back(Box::new(f));
         })
+    }
+
+    pub fn spawn_remote<F>(f: F) -> Result<(), Error> 
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        if let Some(tx) = REMOTE_SPAWNER.get() {
+            tx.send(Box::new(f))
+                .map_err(|e| new_error(format!("Failed to send remote task: {}", e)))?;
+            Ok(())
+        } else {
+            Err(new_error("Remote spawner channel is not initialized!"))
+        }
     }
 
     /// Put the timeout on the queue ordered
@@ -180,6 +217,29 @@ impl EventLoop {
                 TimeoutQueueItem::Interval((std::time::Duration::from_millis(ms), Box::new(f)))
             );
             timeout_id
+        })
+    }
+
+    /// Set a paused task that can be executed later with `EventLoop::resume_paused`
+    pub fn set_paused<F>(f: F) -> Result<u64, Error> 
+    where
+        F: FnOnce() + 'static,
+    {
+        EventLoop::with_running(|e| {
+            let timeout_id = e.timeout_counter;
+            e.timeout_counter += 1;
+
+            e.paused_tasks.insert(timeout_id, Box::new(f));
+            timeout_id
+        })
+    }
+
+    /// Resume a paused task with the given ID, putting it back on the task queue
+    pub fn resume_paused(timeout_id: u64) -> Result<(), Error> {
+        EventLoop::with_running(|e| {
+            if let Some(task) = e.paused_tasks.remove(&timeout_id) {
+                e.task_queue.push_back(task);
+            }
         })
     }
 

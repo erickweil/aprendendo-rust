@@ -1,6 +1,39 @@
-use std::{cell::RefCell, io, mem, rc::Rc, result};
+use std::{cell::RefCell, io, mem, rc::Rc, result, sync::{Arc, Mutex}};
 
 use crate::promise::{Error, EventLoop, new_error};
+
+pub struct PromiseResolveRejectSend<T> {
+    tx: oneshot::Sender<Result<T, Error>>,
+    task_id: u64,
+}
+
+impl<T: 'static + Send> PromiseResolveRejectSend<T> {
+    fn _handle(self, value: Result<T, Error>) {
+        // Send the result to the waiting task, ignoring errors (e.g., if the receiver was dropped)
+        self.tx.send(value).ok();
+
+        let task_id = self.task_id;
+        EventLoop::spawn_remote(move || {
+            EventLoop::resume_paused(task_id).unwrap();
+        });
+    }
+
+    pub fn resolve(self, value: T) {
+        self._handle(Ok(value));
+    }
+
+    pub fn reject(self, err: Error) {
+        self._handle(Err(err));
+    }
+}
+
+// drop?
+// impl<T> Drop for PromiseResolveRejectSend<T> {
+//     fn drop(&mut self) {
+//         // If the PromiseResolveRejectSend is dropped without being resolved or rejected, we should clean up the paused task
+//     }
+// }
+
 
 pub struct PromiseResolveReject<T> {
     state: Rc<RefCell<PromiseState<T>>>
@@ -38,6 +71,28 @@ impl<T: 'static> PromiseResolveReject<T> {
         self._handle(Err(err));
     }
 }
+
+impl<T: Send + 'static> PromiseResolveReject<T> {
+    pub fn into_send(self) -> PromiseResolveRejectSend<T> {
+        let (tx, rx) = oneshot::channel::<Result<T,Error>>();
+
+        // paused task that when called handle the promise
+        let task_id = EventLoop::set_paused(move || {
+            let result = rx.try_recv().ok();
+            if let Some(result) = result {
+                self._handle(result);
+            } else {
+                self.reject(new_error("Nenhum valor ou erro foi definido para a promessa"));
+            }
+        }).unwrap();
+
+        PromiseResolveRejectSend {
+            tx: tx,
+            task_id,
+        }
+    }
+}
+
 enum PromiseState<T> {
     // 0. nem then/catch/finally nem resolve/reject aconteceu -> apenas guardar o estado de pending
     Pending,
