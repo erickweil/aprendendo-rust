@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io, mem, rc::Rc, result, sync::{Arc, Mutex}};
+use std::{cell::RefCell, fmt::Debug, io, mem, rc::Rc, result, sync::{Arc, Mutex}};
 
 use crate::promise::{Error, EventLoop, new_error};
 
@@ -14,8 +14,8 @@ impl<T: 'static + Send> PromiseResolveRejectSend<T> {
 
         let task_id = self.task_id;
         EventLoop::spawn_remote(move || {
-            EventLoop::resume_paused(task_id).unwrap();
-        });
+            EventLoop::resume_paused(task_id)
+        }).unwrap();
     }
 
     pub fn resolve(self, value: T) {
@@ -55,6 +55,7 @@ impl<T: 'static> PromiseResolveReject<T> {
             // Investigar se deve chamar via EventLoop ou pode chamar direto
             EventLoop::spawn(move || {
                 callback(value);
+                Ok(())
             }).unwrap();
         } else if let PromiseState::PendingThen(_) = &*state {
             panic!("Promise already has a result");
@@ -84,11 +85,22 @@ impl<T: Send + 'static> PromiseResolveReject<T> {
             } else {
                 self.reject(new_error("Nenhum valor ou erro foi definido para a promessa"));
             }
+            Ok(())
         }).unwrap();
 
         PromiseResolveRejectSend {
             tx: tx,
             task_id,
+        }
+    }
+}
+
+// Se a promise for Dropada e é um pendingThen com erro, lançar unhandled rejection
+impl <T> Drop for PromiseResolveReject<T> {
+    fn drop(&mut self) {
+        let state = self.state.borrow();
+        if let PromiseState::PendingThen(Err(err)) = &*state {
+            panic!("Unhandled Promise rejection: {}", err);
         }
     }
 }
@@ -103,6 +115,20 @@ enum PromiseState<T> {
     // Settled states
     Fulfilled,
     Rejected,
+}
+
+
+impl<T> Debug for PromiseState<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PromiseState::Pending => write!(f, "Pending"),
+            PromiseState::PendingResolve(_) => write!(f, "PendingResolve"),
+            PromiseState::PendingThen(Ok(_)) => write!(f, "PendingThen(Ok(?))"),
+            PromiseState::PendingThen(Err(_)) => write!(f, "PendingThen(Err(?))"),
+            PromiseState::Fulfilled => write!(f, "Fulfilled"),
+            PromiseState::Rejected => write!(f, "Rejected"),
+        }
+    }
 }
 
 pub struct Promise<T> {
@@ -160,6 +186,7 @@ impl<T: 'static> Promise<T> {
             // Investigar se deve chamar via EventLoop ou pode chamar direto
             EventLoop::spawn(move || {
                 handle_callback(value);
+                Ok(())
             }).unwrap();
         } else if let PromiseState::PendingResolve(_) = &*state {
             panic!("Promise already has a pending callback");
@@ -230,18 +257,20 @@ impl<T: 'static> Promise<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use super::*;
 
     fn delay(ms: u64) -> Promise<()> {
         Promise::new(move |e| {
             EventLoop::set_timeout(move || {
                 e.resolve(());
-            }, ms).unwrap();
+                Ok(())
+            }, Duration::from_millis(ms)).unwrap();
         })
     }
 
     #[test]
-    fn test_promise() {
+    fn test_promise() -> Result<(), Error> {
         let mut finally = Rc::new(RefCell::new(false));
         EventLoop::start(|| {
             let finally_clone = finally.clone();
@@ -258,13 +287,16 @@ mod tests {
             }).finally(move || {
                 *finally_clone.borrow_mut() = true;
             });
-        }).unwrap();
+
+            Ok(())
+        })?;
 
         assert_eq!(*finally.borrow(), true);
+        Ok(())
     }
 
     #[test]
-    fn test_delay() {
+    fn test_delay() -> Result<(), Error> {
         let start = std::time::Instant::now();
         EventLoop::start(|| {
             Promise::resolve(()).then(|_| {
@@ -278,16 +310,19 @@ mod tests {
             }).then(|_| {
                 delay(1)
             });
-        }).unwrap();
+
+            Ok(())
+        })?;
 
         let elapsed = start.elapsed();
         println!("Elapsed: {:?}", elapsed);
         assert!(elapsed >= std::time::Duration::from_millis(5));
         assert!(elapsed < std::time::Duration::from_millis(10));
+        Ok(())
     }
 
     #[test]
-    fn test_chaining() {
+    fn test_chaining() -> Result<(), Error> {
         EventLoop::start(|| {
             let mut promise = Promise::resolve(0);
             for i in 0..10000 {
@@ -302,6 +337,8 @@ mod tests {
                 assert_eq!(counter, 10000);
                 Promise::resolve(())
             });
-        }).unwrap();
+
+            Ok(())
+        })
     }
 }
