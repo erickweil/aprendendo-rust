@@ -1,8 +1,16 @@
-use std::{cell::{OnceCell, RefCell}, collections::{BTreeMap, BinaryHeap, HashMap, VecDeque}, io, sync::{Mutex, MutexGuard, OnceLock, mpsc}, thread::JoinHandle, time::{Duration, Instant}};
+use std::{cell::{OnceCell, RefCell}, collections::{BTreeMap, BinaryHeap, HashMap, VecDeque}, io, sync::{Mutex, MutexGuard, OnceLock, mpsc}, thread::JoinHandle, time::{Duration, Instant, SystemTime}};
 
 pub type Error = Box<dyn std::error::Error + Send + 'static>;
 pub fn new_error(msg: impl Into<String>) -> Error {
     Box::new(io::Error::new(io::ErrorKind::Other, msg.into()))
+}
+
+// https://github.com/rust-lang/rust/issues/71224
+pub fn add_duration(time: Instant, duration: Duration) -> Instant {
+    time.checked_add(duration).unwrap_or_else(|| {
+        // Safe far future, std doesn't have Instant::MAX
+        Instant::now() + Duration::from_secs(86400 * 365 * 30)
+    })
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -13,17 +21,80 @@ pub struct TimeoutQueueKey (
     u64,
 );
 
-pub enum TimeoutQueueItem {
-    Timeout(Box<dyn FnOnce() -> Result<(), Error> + 'static>),
-    Interval((std::time::Duration, Box<dyn FnMut(u64) -> Result<(), Error> + 'static>)),
+enum TimeoutQueueNext {
+    Ready(Box<dyn FnOnce() -> Result<(), Error> + 'static>),
+    NotReady(Duration),
+    Empty,
+}
+
+/// Unified structure that keeps BTreeMap and HashMap in sync automatically
+/// Without this code grows and becomes error-prone with duplicated logic
+struct TimeoutQueue {
+    /// Optimized to get the next timeout and/or obtain a random timeout by its key
+    queue: BTreeMap<TimeoutQueueKey, Box<dyn FnOnce() -> Result<(), Error> + 'static>>,
+    /// Optimized to cancel timeouts by their ID solely, mapping timeout ID to the BTreeMap key
+    index: HashMap<u64, TimeoutQueueKey>,
+    timeout_counter: u64,
+}
+
+impl TimeoutQueue {
+    pub fn new() -> Self {
+        Self {
+            queue: BTreeMap::new(),
+            index: HashMap::new(),
+            timeout_counter: 0,
+        }
+    }
+
+    pub fn create_timeout_key(&mut self, delay: Duration) -> TimeoutQueueKey {
+        let timeout_id = self.timeout_counter;
+        self.timeout_counter += 1;
+
+        TimeoutQueueKey(add_duration(Instant::now(), delay), timeout_id)
+    }
+
+    pub fn insert(&mut self, key: TimeoutQueueKey, timeout_fn: Box<dyn FnOnce() -> Result<(), Error> + 'static>) -> u64 {
+        let timeout_id = key.1;
+        self.index.insert(timeout_id, key.clone());
+        self.queue.insert(key, timeout_fn);
+
+        timeout_id
+    }
+
+    pub fn remove_by_id(&mut self, timeout_id: u64) -> Option<Box<dyn FnOnce() -> Result<(), Error> + 'static>> {
+        let key = self.index.remove(&timeout_id)?;
+        self.queue.remove(&key)
+    }
+
+    /// Get the next timeout that is ready to be executed, if there is not any ready timeout, return the Duration to it
+    pub fn pop_if_ready(&mut self) -> TimeoutQueueNext {
+        let Some(entry) = self.queue.first_entry() else {
+            return TimeoutQueueNext::Empty;
+        };
+
+        let now = std::time::Instant::now();
+        let entry_key = entry.key();
+        if entry_key.0 > now {
+            return TimeoutQueueNext::NotReady(entry_key.0 - now);
+        }
+
+        // Remove from the ID map also
+        self.index.remove(&entry_key.1);
+        let item = entry.remove();
+        TimeoutQueueNext::Ready(item)
+    }
+
+    pub fn clear(&mut self) {
+        self.queue.clear();
+        self.index.clear();
+        // don't reset counter
+    }
 }
 
 pub struct EventLoop {
     task_queue: VecDeque<Box<dyn FnOnce() -> Result<(), Error> + 'static>>,
-    timeout_queue: BTreeMap<TimeoutQueueKey, TimeoutQueueItem>,
-    paused_tasks: HashMap<u64, Box<dyn FnOnce() -> Result<(), Error> + 'static>>,
+    timeout_queue: TimeoutQueue,
     event_loop_rx: mpsc::Receiver<Box<dyn FnOnce() -> Result<(), Error> + Send + 'static>>,
-    timeout_counter: u64,
     is_running: bool,
 }
 
@@ -53,9 +124,7 @@ impl EventLoop {
                 
                 instance.set(RefCell::new(EventLoop {
                     task_queue: VecDeque::new(),
-                    timeout_queue: BTreeMap::new(),
-                    paused_tasks: HashMap::new(),
-                    timeout_counter: 0,
+                    timeout_queue: TimeoutQueue::new(),
                     event_loop_rx: rx,
                     is_running: false,
                 })).ok();
@@ -134,58 +203,28 @@ impl EventLoop {
         }
 
         // 1. Now check and run a timeout (they're ordered)
-        let now = std::time::Instant::now();
-        let (timeout, time_next) = EventLoop::with_unchecked(|e| {
-            let Some(mut entry) = e.timeout_queue.first_entry() else {
-                return (None, None);
-            };
-            if entry.key().0 > now {
-                return (None, Some(entry.key().0 - now));
-            }
-
-            let key = entry.key().clone();
-            let item = entry.remove();
-            (Some((key, item)), None)
+        let next = EventLoop::with_unchecked(|e| {
+            e.timeout_queue.pop_if_ready()
         });
 
-        if let Some((timeout_key, timeout_item)) = timeout {
-            match timeout_item {
-                TimeoutQueueItem::Timeout(f) => {
-                    f()?;
-                },
-                TimeoutQueueItem::Interval((delay, mut f)) => {
-                    f(timeout_key.1)?;
-                    // Reschedule the same interval with the same key to allow cancellation
-                    EventLoop::with_unchecked(|e| {
-                        e.timeout_queue.insert(
-                            TimeoutQueueKey(timeout_key.0 + delay, timeout_key.1), 
-                            TimeoutQueueItem::Interval((delay, f))
-                        );
-                    });
-                },
+        let time_next = match next {
+            TimeoutQueueNext::Ready(timeout_fn) => {
+                timeout_fn()?;
+                return Ok(false);
+            },
+            TimeoutQueueNext::Empty => {
+                // If there are no paused tasks and no timeouts scheduled, we can stop the event loop
+                return Ok(true);
             }
-            return Ok(false);
-        } 
+            TimeoutQueueNext::NotReady(time_next) => time_next,
+        };
 
         // 2. If there are no tasks or timeouts to run, wait for a remote task to be spawned or a timeout to be ready
         return EventLoop::with_unchecked(|e| {
-            let has_paused_tasks = time_next.is_some() || !e.paused_tasks.is_empty();
-            if !has_paused_tasks { 
-                // If there are no paused tasks and no timeouts scheduled, we can stop the event loop
-                return Ok(true)
-            }
-
-            let maybe_remote_task = if let Some(time_next) = time_next {
-                match e.event_loop_rx.recv_timeout(time_next) {
-                    Ok(task) => Some(task),
-                    Err(mpsc::RecvTimeoutError::Timeout) => None,
-                    Err(e) => return Err(new_error(format!("Failed to receive remote task: {}", e))),
-                }
-            } else {
-                match e.event_loop_rx.recv() {
-                    Ok(task) => Some(task),
-                    Err(e) => return Err(new_error(format!("Failed to receive remote task: {}", e))),
-                }
+            let maybe_remote_task = match e.event_loop_rx.recv_timeout(time_next) {
+                Ok(task) => Some(task),
+                Err(mpsc::RecvTimeoutError::Timeout) => None,
+                Err(e) => return Err(new_error(format!("Failed to receive remote task: {}", e))),
             };
 
             if let Some(remote_task) = maybe_remote_task {
@@ -200,7 +239,6 @@ impl EventLoop {
         EventLoop::with(|e| {
             e.task_queue.clear();
             e.timeout_queue.clear();
-            e.paused_tasks.clear();
         })
     }
 
@@ -258,16 +296,9 @@ impl EventLoop {
     where
         F: FnOnce() -> Result<(), Error> + 'static,
     {
-        let timeout_time = std::time::Instant::now() + delay;
         EventLoop::with(|e| {
-            let timeout_id = e.timeout_counter;
-            e.timeout_counter += 1;
-
-            e.timeout_queue.insert(
-                TimeoutQueueKey(timeout_time, timeout_id), 
-                TimeoutQueueItem::Timeout(Box::new(f))
-            );
-            timeout_id
+            let key = e.timeout_queue.create_timeout_key(delay);
+            e.timeout_queue.insert(key, Box::new(f))
         })
     }
 
@@ -275,54 +306,54 @@ impl EventLoop {
     where
         F: FnMut(u64) -> Result<(), Error> + 'static,
     {
-        let timeout_time = std::time::Instant::now() + delay;        
-        EventLoop::with(|e| {
-            let timeout_id = e.timeout_counter;
-            e.timeout_counter += 1;
+        fn interval_fn<F>(mut f: F, delay: Duration, key: TimeoutQueueKey) -> Result<(), Error> 
+        where
+            F: FnMut(u64) -> Result<(), Error> + 'static,
+        {
+            f(key.1)?;
+            
+            // Re-agenda com o MESMO timeout_id
+            EventLoop::with_unchecked(|e| {
+                let key = TimeoutQueueKey(add_duration(key.0, delay), key.1);
+                e.timeout_queue.insert(key.clone(), Box::new(move || {
+                    interval_fn(f, delay, key)
+                }));
+            });
 
-            e.timeout_queue.insert(
-                TimeoutQueueKey(timeout_time, timeout_id), 
-                TimeoutQueueItem::Interval((delay, Box::new(f)))
-            );
-            timeout_id
+            Ok(())
+        }
+
+        EventLoop::with(|e| {
+            let key = e.timeout_queue.create_timeout_key(delay);
+            e.timeout_queue.insert(key.clone(), Box::new(move || {
+                interval_fn(f, delay, key)
+            }))
         })
     }
 
-    /// Set a paused task that can be executed later with `EventLoop::resume_paused`
-    pub fn set_paused<F>(f: F) -> Result<u64, Error> 
-    where
-        F: FnOnce() -> Result<(), Error> + 'static,
-    {
+    /// Re-schedule a timeout, putting it directly in the microtask queue
+    pub fn wake_timeout(timeout_id: u64) -> Result<(), Error> {
         EventLoop::with(|e| {
-            let timeout_id = e.timeout_counter;
-            e.timeout_counter += 1;
+            // 1. find task and remove it
+            let Some(task) = e.timeout_queue.remove_by_id(timeout_id) else {
+                return Err(new_error(format!("No timeout found with id {}", timeout_id)));
+            };
 
-            e.paused_tasks.insert(timeout_id, Box::new(f));
-            timeout_id
-        })
-    }
+            // 2. push to task queue
+            e.task_queue.push_back(task);
 
-    /// Resume a paused task with the given ID, putting it back on the task queue
-    pub fn resume_paused(timeout_id: u64) -> Result<(), Error> {
-        EventLoop::with(|e| {
-            if let Some(task) = e.paused_tasks.remove(&timeout_id) {
-                e.task_queue.push_back(task);
-            }
-        })
+            Ok(())
+        })?
     }
 
     pub fn clear_timeout(timeout_id: u64) -> Result<(), Error> {
         let f = move || {
-            // Remove the timeout with the given ID from the queue, if it exists
-            EventLoop::with(|e| {
-                // iterate over the timeout queue and remove the first entry with the given ID
-                let found_key = e.timeout_queue.keys().find(|key| key.1 == timeout_id).cloned();
-                if let Some(key) = found_key {
-                    e.timeout_queue.remove(&key);
-                }
-            })?;
+            EventLoop::with_unchecked(|e| {
+                // find task and remove it, ignoring errors
+                let _ = e.timeout_queue.remove_by_id(timeout_id);
 
-            Ok(())
+                Ok(())
+            })
         };
         // Schedules the clear_timeout to run on the next tick in the event loop to avoid issues with timeouts auto-canceling
         // push_front, so it runs before any other task in the next tick

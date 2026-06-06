@@ -1,6 +1,6 @@
-use std::{cell::RefCell, fmt::Debug, io, mem, rc::Rc, result, sync::{Arc, Mutex}};
-
+use std::{cell::RefCell, convert::Infallible, fmt::Debug, io, mem, rc::Rc, result, sync::{Arc, Mutex}, time::Duration};
 use crate::promise::{Error, EventLoop, new_error};
+//use std::ops::{FromResidual};
 
 pub struct PromiseResolveRejectSend<T> {
     tx: oneshot::Sender<Result<T, Error>>,
@@ -14,7 +14,7 @@ impl<T: 'static + Send> PromiseResolveRejectSend<T> {
 
         let task_id = self.task_id;
         EventLoop::try_spawn_remote(move || {
-            EventLoop::resume_paused(task_id)
+            EventLoop::wake_timeout(task_id)
         }).unwrap();
     }
 
@@ -78,7 +78,7 @@ impl<T: Send + 'static> PromiseResolveReject<T> {
         let (tx, rx) = oneshot::channel::<Result<T,Error>>();
 
         // paused task that when called handle the promise
-        let task_id = EventLoop::set_paused(move || {
+        let task_id = EventLoop::set_timeout(move || {
             let result = rx.try_recv().ok();
             if let Some(result) = result {
                 self._handle(result);
@@ -86,7 +86,7 @@ impl<T: Send + 'static> PromiseResolveReject<T> {
                 self.reject(new_error("Nenhum valor ou erro foi definido para a promessa"));
             }
             Ok(())
-        }).unwrap();
+        }, Duration::MAX).unwrap();
 
         PromiseResolveRejectSend {
             tx: tx,
@@ -104,7 +104,7 @@ impl <T> Drop for PromiseResolveReject<T> {
             let err = new_error(format!("Unhandled Promise rejection: {}", err));
             EventLoop::spawn(move || {
                 Err(err)
-            });
+            }).ok();
         }
     }
 }
@@ -258,6 +258,28 @@ impl<T: 'static> Promise<T> {
         }
     }
 }
+
+/// Permite converter um Result em uma Promise, onde Ok se torna resolve e Err se torna reject
+impl<T: 'static, E: std::error::Error + Send + 'static> From<Result<T, E>> for Promise<T> {
+    fn from(result: Result<T, E>) -> Self {
+        match result {
+            Ok(v)  => Promise::resolve(v),
+            Err(e) => Promise::reject(Box::new(e)),
+        }
+    }
+}
+
+/*
+nightly
+/// Permite usar o operador `?` dentro do .then(), convertendo Err em reject da Promise
+impl<T: 'static, E: std::error::Error + Send + 'static> FromResidual<Result<Infallible, E>> for Promise<T> {
+    fn from_residual(residual: Result<Infallible, E>) -> Self {
+        match residual {
+            Err(e) => Promise::reject(Box::new(e)),
+            _ => unreachable!(),
+        }
+    }
+}*/
 
 #[cfg(test)]
 mod tests {
