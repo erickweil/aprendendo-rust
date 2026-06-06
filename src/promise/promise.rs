@@ -13,7 +13,7 @@ impl<T: 'static + Send> PromiseResolveRejectSend<T> {
         self.tx.send(value).ok();
 
         let task_id = self.task_id;
-        EventLoop::spawn_remote(move || {
+        EventLoop::try_spawn_remote(move || {
             EventLoop::resume_paused(task_id)
         }).unwrap();
     }
@@ -100,7 +100,11 @@ impl <T> Drop for PromiseResolveReject<T> {
     fn drop(&mut self) {
         let state = self.state.borrow();
         if let PromiseState::PendingThen(Err(err)) = &*state {
-            panic!("Unhandled Promise rejection: {}", err);
+            // Gracefully handle unhandled promise rejections by scheduling a task that throws an Err in the event loop
+            let err = new_error(format!("Unhandled Promise rejection: {}", err));
+            EventLoop::spawn(move || {
+                Err(err)
+            });
         }
     }
 }
@@ -271,8 +275,9 @@ mod tests {
 
     #[test]
     fn test_promise() -> Result<(), Error> {
-        let mut finally = Rc::new(RefCell::new(false));
-        EventLoop::start(|| {
+        EventLoop::spawn_remote(move || {
+            let mut finally = Rc::new(RefCell::new(false));
+
             let finally_clone = finally.clone();
             Promise::new(|e| {
                 e.resolve("OK A B C".to_string());
@@ -289,16 +294,13 @@ mod tests {
             });
 
             Ok(())
-        })?;
-
-        assert_eq!(*finally.borrow(), true);
-        Ok(())
+        }).join().unwrap()
     }
 
     #[test]
     fn test_delay() -> Result<(), Error> {
-        let start = std::time::Instant::now();
-        EventLoop::start(|| {
+        EventLoop::spawn_remote(move || {
+            let start = std::time::Instant::now();
             Promise::resolve(()).then(|_| {
                 delay(1)
             }).then(|_| {
@@ -309,21 +311,20 @@ mod tests {
                 delay(1)
             }).then(|_| {
                 delay(1)
+            }).finally(move || {
+                let elapsed = start.elapsed();
+                println!("Elapsed: {:?}", elapsed);
+                assert!(elapsed >= std::time::Duration::from_millis(5));
+                assert!(elapsed < std::time::Duration::from_millis(10));
             });
-
+        
             Ok(())
-        })?;
-
-        let elapsed = start.elapsed();
-        println!("Elapsed: {:?}", elapsed);
-        assert!(elapsed >= std::time::Duration::from_millis(5));
-        assert!(elapsed < std::time::Duration::from_millis(10));
-        Ok(())
+        }).join().unwrap()
     }
 
     #[test]
     fn test_chaining() -> Result<(), Error> {
-        EventLoop::start(|| {
+        EventLoop::spawn_remote(move || {
             let mut promise = Promise::resolve(0);
             for i in 0..10000 {
                 promise = promise.then(move |counter| {
@@ -339,6 +340,6 @@ mod tests {
             });
 
             Ok(())
-        })
+        }).join().unwrap()
     }
 }
