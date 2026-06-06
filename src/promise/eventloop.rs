@@ -1,7 +1,7 @@
 use std::{cell::{OnceCell, RefCell}, collections::{BTreeMap, BinaryHeap, HashMap, VecDeque}, io, sync::{Mutex, MutexGuard, OnceLock, mpsc}, thread::JoinHandle, time::{Duration, Instant, SystemTime}};
 
-pub type Error = Box<dyn std::error::Error + Send + 'static>;
-pub fn new_error(msg: impl Into<String>) -> Error {
+pub type BoxedError = Box<dyn std::error::Error + Send + 'static>;
+pub fn new_error(msg: impl Into<String>) -> BoxedError {
     Box::new(io::Error::new(io::ErrorKind::Other, msg.into()))
 }
 
@@ -22,7 +22,7 @@ pub struct TimeoutQueueKey (
 );
 
 enum TimeoutQueueNext {
-    Ready(Box<dyn FnOnce() -> Result<(), Error> + 'static>),
+    Ready(Box<dyn FnOnce() -> Result<(), BoxedError> + 'static>),
     NotReady(Duration),
     Empty,
 }
@@ -31,7 +31,7 @@ enum TimeoutQueueNext {
 /// Without this code grows and becomes error-prone with duplicated logic
 struct TimeoutQueue {
     /// Optimized to get the next timeout and/or obtain a random timeout by its key
-    queue: BTreeMap<TimeoutQueueKey, Box<dyn FnOnce() -> Result<(), Error> + 'static>>,
+    queue: BTreeMap<TimeoutQueueKey, Box<dyn FnOnce() -> Result<(), BoxedError> + 'static>>,
     /// Optimized to cancel timeouts by their ID solely, mapping timeout ID to the BTreeMap key
     index: HashMap<u64, TimeoutQueueKey>,
     timeout_counter: u64,
@@ -53,7 +53,7 @@ impl TimeoutQueue {
         TimeoutQueueKey(add_duration(Instant::now(), delay), timeout_id)
     }
 
-    pub fn insert(&mut self, key: TimeoutQueueKey, timeout_fn: Box<dyn FnOnce() -> Result<(), Error> + 'static>) -> u64 {
+    pub fn insert(&mut self, key: TimeoutQueueKey, timeout_fn: Box<dyn FnOnce() -> Result<(), BoxedError> + 'static>) -> u64 {
         let timeout_id = key.1;
         self.index.insert(timeout_id, key.clone());
         self.queue.insert(key, timeout_fn);
@@ -61,7 +61,7 @@ impl TimeoutQueue {
         timeout_id
     }
 
-    pub fn remove_by_id(&mut self, timeout_id: u64) -> Option<Box<dyn FnOnce() -> Result<(), Error> + 'static>> {
+    pub fn remove_by_id(&mut self, timeout_id: u64) -> Option<Box<dyn FnOnce() -> Result<(), BoxedError> + 'static>> {
         let key = self.index.remove(&timeout_id)?;
         self.queue.remove(&key)
     }
@@ -92,9 +92,9 @@ impl TimeoutQueue {
 }
 
 pub struct EventLoop {
-    task_queue: VecDeque<Box<dyn FnOnce() -> Result<(), Error> + 'static>>,
+    task_queue: VecDeque<Box<dyn FnOnce() -> Result<(), BoxedError> + 'static>>,
     timeout_queue: TimeoutQueue,
-    event_loop_rx: mpsc::Receiver<Box<dyn FnOnce() -> Result<(), Error> + Send + 'static>>,
+    event_loop_rx: mpsc::Receiver<Box<dyn FnOnce() -> Result<(), BoxedError> + Send + 'static>>,
     is_running: bool,
 }
 
@@ -106,18 +106,18 @@ thread_local! {
 }
 
 /// A channel that allows tasks to be spawned from other threads to the event loop thread
-static EVENT_LOOP_TX: OnceLock<mpsc::Sender<Box<dyn FnOnce() -> Result<(), Error> + Send + 'static>>> = OnceLock::new();
+static EVENT_LOOP_TX: OnceLock<mpsc::Sender<Box<dyn FnOnce() -> Result<(), BoxedError> + Send + 'static>>> = OnceLock::new();
 
 impl EventLoop {
     /// Will initialize the EventLoop if it is not already
     /// Produce an error if it was already initialized in another thread
-    fn with<R>(f: impl FnOnce(&mut EventLoop) -> R) -> Result<R, Error> {
+    fn with<R>(f: impl FnOnce(&mut EventLoop) -> R) -> Result<R, BoxedError> {
         INSTANCE.with(|instance| {
             let event_loop = if let Some(event_loop) = instance.get() {
                 event_loop
             } else {
                 // Create the channel for remote task spawning
-                let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() -> Result<(), Error> + Send + 'static>>();
+                let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() -> Result<(), BoxedError> + Send + 'static>>();
 
                 // Fails if another thread has already initialized the event loop and set the channel
                 EVENT_LOOP_TX.set(tx).map_err(|_| new_error("Failed to set remote spawner channel! EventLoop was already initialized in another thread?"))?;
@@ -144,9 +144,9 @@ impl EventLoop {
         })
     }
 
-    pub fn start<F>(first_task: F) -> Result<(), Error>
+    pub fn start<F>(first_task: F) -> Result<(), BoxedError>
     where 
-        F: FnOnce() -> Result<(), Error>,
+        F: FnOnce() -> Result<(), BoxedError>,
     {
         // run the first task
         first_task()?;
@@ -156,7 +156,7 @@ impl EventLoop {
 
     /// Run the event loop and block until there are no more tasks to execute and no more timeouts scheduled
     /// Only a single thread can ever run the event loop. Trying to run it from other threads will panic
-    pub fn run_event_loop() -> Result<(), Error> {
+    pub fn run_event_loop() -> Result<(), BoxedError> {
         // Get the event loop once using .with() to ensure it's initialized
         EventLoop::with(|e| {
             e.is_running = true;
@@ -190,7 +190,7 @@ impl EventLoop {
     /// 0. Tasks in the task queue (spawned with `EventLoop::spawn`)
     /// 1. Timeouts in the timeout queue (scheduled with `EventLoop::set_timeout` or `EventLoop::set_interval`) that are ready to run
     /// 2. Scheduling of remote tasks waiting in the channel (spawned with `EventLoop::spawn_remote`)
-    fn run_event_loop_tick() -> Result<bool, Error> {
+    fn run_event_loop_tick() -> Result<bool, BoxedError> {
         // 0. Get the next task from the queue
         let maybe_task = EventLoop::with_unchecked(|e| {
             e.task_queue.pop_front()
@@ -235,7 +235,7 @@ impl EventLoop {
     }
 
     /// Clear all pending tasks to gracefully stop the event loop
-    pub fn stop() -> Result<(), Error> {
+    pub fn stop() -> Result<(), BoxedError> {
         EventLoop::with(|e| {
             e.task_queue.clear();
             e.timeout_queue.clear();
@@ -243,9 +243,9 @@ impl EventLoop {
     }
 
     /// Spawn a task to be executed by the event loop
-    pub fn spawn<F>(f: F) -> Result<(), Error> 
+    pub fn spawn<F>(f: F) -> Result<(), BoxedError> 
     where
-        F: FnOnce() -> Result<(), Error> + 'static,
+        F: FnOnce() -> Result<(), BoxedError> + 'static,
     {
         EventLoop::with(|e| {
             e.task_queue.push_back(Box::new(f));
@@ -255,9 +255,9 @@ impl EventLoop {
     /// It'll schedule a task in the event loop
     /// If the event loop is running it'll receive the task and execute it,
     /// If is not running a error is returned
-    pub fn try_spawn_remote<F>(f: F) -> Result<(), Error>
+    pub fn try_spawn_remote<F>(f: F) -> Result<(), BoxedError>
     where
-        F: FnOnce() -> Result<(), Error> + Send + 'static,
+        F: FnOnce() -> Result<(), BoxedError> + Send + 'static,
     {
         if let Some(tx) = EVENT_LOOP_TX.get() {
             tx.send(Box::new(f))
@@ -273,9 +273,9 @@ impl EventLoop {
     /// If the event loop is running it'll receive the task and execute it and the new thread will end immediately,
     /// If is not running it will start the event loop in the new thread and run it until completion
     /// (then after the event loop ends, the thread will end too and any future attempt to start a new EventLoop will fail)
-    pub fn spawn_remote<F>(f: F) -> JoinHandle<Result<(), Error>>
+    pub fn spawn_remote<F>(f: F) -> JoinHandle<Result<(), BoxedError>>
     where
-        F: FnOnce() -> Result<(), Error> + Send + 'static,
+        F: FnOnce() -> Result<(), BoxedError> + Send + 'static,
     {
         std::thread::spawn(move || {
             // Try to spawn a dummy task in the event loop, if it suceeds is because no event loop ever started in any thread
@@ -292,9 +292,9 @@ impl EventLoop {
     }
 
     /// Put the timeout on the queue ordered
-    pub fn set_timeout<F>(f: F, delay: Duration) -> Result<u64, Error> 
+    pub fn set_timeout<F>(f: F, delay: Duration) -> Result<u64, BoxedError> 
     where
-        F: FnOnce() -> Result<(), Error> + 'static,
+        F: FnOnce() -> Result<(), BoxedError> + 'static,
     {
         EventLoop::with(|e| {
             let key = e.timeout_queue.create_timeout_key(delay);
@@ -302,13 +302,13 @@ impl EventLoop {
         })
     }
 
-    pub fn set_interval<F>(mut f: F, delay: Duration) -> Result<u64, Error> 
+    pub fn set_interval<F>(mut f: F, delay: Duration) -> Result<u64, BoxedError> 
     where
-        F: FnMut(u64) -> Result<(), Error> + 'static,
+        F: FnMut(u64) -> Result<(), BoxedError> + 'static,
     {
-        fn interval_fn<F>(mut f: F, delay: Duration, key: TimeoutQueueKey) -> Result<(), Error> 
+        fn interval_fn<F>(mut f: F, delay: Duration, key: TimeoutQueueKey) -> Result<(), BoxedError> 
         where
-            F: FnMut(u64) -> Result<(), Error> + 'static,
+            F: FnMut(u64) -> Result<(), BoxedError> + 'static,
         {
             f(key.1)?;
             
@@ -332,7 +332,7 @@ impl EventLoop {
     }
 
     /// Re-schedule a timeout, putting it directly in the microtask queue
-    pub fn wake_timeout(timeout_id: u64) -> Result<(), Error> {
+    pub fn wake_timeout(timeout_id: u64) -> Result<(), BoxedError> {
         EventLoop::with(|e| {
             // 1. find task and remove it
             let Some(task) = e.timeout_queue.remove_by_id(timeout_id) else {
@@ -346,7 +346,7 @@ impl EventLoop {
         })?
     }
 
-    pub fn clear_timeout(timeout_id: u64) -> Result<(), Error> {
+    pub fn clear_timeout(timeout_id: u64) -> Result<(), BoxedError> {
         let f = move || {
             EventLoop::with_unchecked(|e| {
                 // find task and remove it, ignoring errors
@@ -393,7 +393,7 @@ mod tests {
 
 
     #[test]
-    fn test_spawn() -> Result<(), Error> {
+    fn test_spawn() -> Result<(), BoxedError> {
         let counter = TestCounter::new();
         assert_eq!(counter.increment(), 1);
 
@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn test_timeout() -> Result<(), Error> {
+    fn test_timeout() -> Result<(), BoxedError> {
         EventLoop::spawn_remote(|| {
             let counter = TestCounter::new();
 
@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interval() -> Result<(), Error> {
+    fn test_interval() -> Result<(), BoxedError> {
         let counter = TestCounter::new();
 
         let _counter = counter.clone();
@@ -480,10 +480,10 @@ mod tests {
     }
 
     #[test]
-    fn test_microtask_recursive() -> Result<(), Error> {
+    fn test_microtask_recursive() -> Result<(), BoxedError> {
         // This recursive spawning should not cause stack overflow
         // also it will only run set_timeout (Macrotask) after all the recursive spawns (Microtask)
-        fn recursive_fn(counter: TestCounter) -> Result<(), Error> {
+        fn recursive_fn(counter: TestCounter) -> Result<(), BoxedError> {
             if counter.increment() > 100000 {
                 return Ok(());
             }

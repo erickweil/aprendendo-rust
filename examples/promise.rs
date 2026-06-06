@@ -1,25 +1,25 @@
 use std::{thread, time::Duration};
 use basico::promise::{promise::{Promise}, *};
-fn main() -> Result<(), Error> {
-    Promise::new(|e| {
+fn main() -> Result<(), BoxedError> {
+    let promessa = Promise::new(|e| {
         let e = e.into_send();
         thread::spawn(|| {
             match std::fs::read("test.txt".to_string()) {
                 Ok(v) => e.resolve(v),
-                Err(err) => e.reject(Box::new(err)),
+                Err(err) => e.reject(err),
             }
         });
-    }).then(|bytes| {
+    }).map(|bytes| {
         println!("Finished read file! Bytes read: '{}'", bytes.len());
         
-        String::from_utf8(bytes).into()
+        String::from_utf8(bytes)
     }).then(|text| {
         println!("File content: '{}'", text);
         
-        Promise::resolve(())
+        Promise::resolve(text)
     }).catch(|err| {
         println!("Error reading file: {}", err);
-        Promise::resolve(())
+        Promise::resolve("".to_string())
     });
 
     let mut count = 0;
@@ -27,7 +27,7 @@ fn main() -> Result<(), Error> {
         println!("Interval! {}", count);
         count += 1;
 
-        if count > 100000 {
+        if count > 10 {
             EventLoop::clear_timeout(id);
         }
 

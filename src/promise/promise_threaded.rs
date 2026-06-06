@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use crate::promise::{Error};
+use crate::promise::{BoxedError};
 pub struct PromiseResolveReject<T> {
-    tx: oneshot::Sender<Result<T, Error>>
+    tx: oneshot::Sender<Result<T, BoxedError>>
 }
 
 impl<T> PromiseResolveReject<T> {
@@ -10,7 +10,7 @@ impl<T> PromiseResolveReject<T> {
         self.tx.send(Ok(value)).ok();
     }
 
-    pub fn reject(self, err: Error) {
+    pub fn reject(self, err: BoxedError) {
         self.tx.send(Err(err)).ok();
     }
 }
@@ -21,8 +21,8 @@ impl<T> PromiseResolveReject<T> {
 /// O método `wait_blocking` bloqueia a thread atual até que a promessa seja resolvida ou rejeitada, retornando o resultado ou o erro
 pub enum Promise<T> {
     Resolved(T),
-    Rejected(Error),
-    Pending(oneshot::Receiver<Result<T, Error>>),
+    Rejected(BoxedError),
+    Pending(oneshot::Receiver<Result<T, BoxedError>>),
 }
 
 impl<T: Send + 'static> Promise<T> {
@@ -30,7 +30,7 @@ impl<T: Send + 'static> Promise<T> {
     where 
         C: FnOnce(PromiseResolveReject<T>) + Send + 'static,
     {
-        let (tx, rx) = oneshot::channel::<Result<T, Error>>();
+        let (tx, rx) = oneshot::channel::<Result<T, BoxedError>>();
         // A promessa inicia o processamento IMEDIATAMENTE de forma síncrona
         run(PromiseResolveReject { tx });        
 
@@ -41,21 +41,21 @@ impl<T: Send + 'static> Promise<T> {
         Self::Resolved(value)
     }
 
-    pub fn reject(err: Error) -> Self {
+    pub fn reject(err: BoxedError) -> Self {
         Self::Rejected(err)
     }
 
     /// Método auxiliar para encadear operações após a resolução ou rejeição da promessa, sem bloquear a thread atual
     fn after_waiting<F, K>(self, f: F) -> Promise<K>
     where
-        F: FnOnce(Result<T, Error>) -> Promise<K> + Send + 'static,
+        F: FnOnce(Result<T, BoxedError>) -> Promise<K> + Send + 'static,
         K: Send + 'static,
     {
         match self {
             Self::Resolved(value) => f(Ok(value)),
             Self::Rejected(err) => f(Err(err)),
             Self::Pending(_) => {
-                let (tx, rx) = oneshot::channel::<Result<K, Error>>();
+                let (tx, rx) = oneshot::channel::<Result<K, BoxedError>>();
 
                 //return Promise::new(move |e| {
                 std::thread::spawn(move || {
@@ -84,7 +84,7 @@ impl<T: Send + 'static> Promise<T> {
         })
     }
 
-    pub fn catch(self, f: impl FnOnce(Error) -> Promise<T> + Send + 'static) -> Promise<T> {
+    pub fn catch(self, f: impl FnOnce(BoxedError) -> Promise<T> + Send + 'static) -> Promise<T> {
         self.after_waiting(move |result| {
             match result {
                 Ok(value) => Promise::Resolved(value),
@@ -103,7 +103,7 @@ impl<T: Send + 'static> Promise<T> {
         })
     }
 
-    pub fn wait_blocking(self) -> Result<T, Error> {
+    pub fn wait_blocking(self) -> Result<T, BoxedError> {
         match self {
             Self::Resolved(value) => Ok(value),
             Self::Rejected(err) => Err(err),
