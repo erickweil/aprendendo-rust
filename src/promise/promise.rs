@@ -1,14 +1,14 @@
-use std::{cell::RefCell, convert::Infallible, fmt::Debug, io, mem, rc::Rc, result, sync::{Arc, Mutex}, time::Duration};
-use crate::promise::{BoxedError, EventLoop, new_error};
+use std::{cell::RefCell, convert::Infallible, fmt::{Debug, Display}, io, mem, rc::Rc, result, sync::{Arc, Mutex}, time::Duration};
+use crate::promise::{BoxedError, EventLoop, EventLoopError, new_error};
 //use std::ops::{FromResidual};
 
-pub struct PromiseResolveRejectSend<T> {
-    tx: oneshot::Sender<Result<T, BoxedError>>,
+pub struct PromiseResolveRejectSend<T, E> {
+    tx: oneshot::Sender<Result<T, E>>,
     task_id: u64,
 }
 
-impl<T: 'static + Send> PromiseResolveRejectSend<T> {
-    fn _handle(self, value: Result<T, BoxedError>) {
+impl<T: 'static + Send, E: Send + 'static> PromiseResolveRejectSend<T, E> {
+    fn _handle(self, value: Result<T, E>) {
         // Send the result to the waiting task, ignoring errors (e.g., if the receiver was dropped)
         self.tx.send(value).ok();
 
@@ -22,10 +22,8 @@ impl<T: 'static + Send> PromiseResolveRejectSend<T> {
         self._handle(Ok(value));
     }
 
-    pub fn reject<E>(self, err: E) 
-    where E: std::error::Error + Send + 'static,
-    {
-        self._handle(Err(Box::new(err)));
+    pub fn reject(self, err: E) {
+        self._handle(Err(err));
     }
 }
 
@@ -37,33 +35,35 @@ impl<T: 'static + Send> PromiseResolveRejectSend<T> {
 // }
 
 
-pub struct PromiseResolveReject<T> {
-    state: Rc<RefCell<PromiseState<T>>>
+pub struct PromiseResolveReject<T, E> {
+    state: Rc<RefCell<PromiseState<T, E>>>
 }
 
-impl<T: 'static> PromiseResolveReject<T> {
+impl<T: 'static, E: 'static> PromiseResolveReject<T, E> {
     pub fn resolve(self, value: T) {
         self.state.borrow_mut().on_settle(Ok(value));
     }
 
-    pub fn reject<E>(self, err: E)
-    where E: std::error::Error + Send + 'static,
+    pub fn reject(self, err: E)
     {
-        self.state.borrow_mut().on_settle(Err(Box::new(err)));
+        self.state.borrow_mut().on_settle(Err(err));
     }
 }
 
-impl<T: Send + 'static> PromiseResolveReject<T> {
-    pub fn into_send(self) -> PromiseResolveRejectSend<T> {
-        let (tx, rx) = oneshot::channel::<Result<T,BoxedError>>();
+impl<T: Send + 'static, E: Send + 'static> PromiseResolveReject<T, E> {
+    pub fn into_send(self) -> PromiseResolveRejectSend<T, E> {
+        let (tx, rx) = oneshot::channel::<Result<T,E>>();
 
         // paused task that when called handle the promise
         let task_id = EventLoop::set_timeout(move || {
-            let result = rx.try_recv().ok();
-            if let Some(result) = result {
+            let result = rx.try_recv();
+            if let Ok(result) = result {
                 self.state.borrow_mut().on_settle(result);
-            } else {
-                self.state.borrow_mut().on_settle(Err(new_error("Nenhum valor ou erro foi definido para a promessa")));
+            } else if let Err(e) = result {
+                //self.state.borrow_mut().on_settle(Err(new_error("Nenhum valor ou erro foi definido para a promessa")));
+                EventLoop::spawn(move || {
+                    Err(EventLoopError::TaskError(new_error(format!("into_send() didn't resolve or reject: {}", e))))
+                }).ok();
             }
             Ok(())
         }, Duration::MAX).unwrap();
@@ -76,49 +76,50 @@ impl<T: Send + 'static> PromiseResolveReject<T> {
 }
 
 // Se a promise for Dropada e é um PendingCatch com erro, lançar unhandled rejection
-impl <T> Drop for PromiseResolveReject<T> {
+impl <T,E> Drop for PromiseResolveReject<T,E> {
     fn drop(&mut self) {
         let state = self.state.borrow();
         if let PromiseState::PendingCatch(err) = &*state {
             // Gracefully handle unhandled promise rejections by scheduling a task that throws an Err in the event loop
-            let err = new_error(format!("Unhandled Promise rejection: {}", err));
+            // TODO: see about logging error
+            let err = new_error(format!("Unhandled Promise rejection"));
             EventLoop::spawn(move || {
-                Err(err)
+                Err(EventLoopError::TaskError(err))
             }).ok();
         }
     }
 }
 
-enum PromiseState<T> {
+enum PromiseState<T, E> {
     // 0. nem then/catch/finally nem resolve/reject aconteceu -> apenas guardar o estado de pending
     Pending,
     // 1. then/catch/finally acontece antes de resolve/reject -> guardar callback e spawn da task quando chegar o resultado
-    PendingResolve(Box<dyn FnOnce(Result<T, BoxedError>)>),
+    PendingResolve(Box<dyn FnOnce(Result<T, E>)>),
     // 2. resolve acontece antes de then/finally -> guardar valor, e quando daí depois spawn task já com o resultado
     PendingThen(T),
     // 3. reject acontece antes de catch/finally -> guardar valor, e quando daí depois spawn task já com o resultado
-    PendingCatch(BoxedError),
+    PendingCatch(E),
     // 4. Já recebeu resultado e já executou e já foi movida, nada mais a fazer
     Settled,
 }
 
 
-impl<T> Debug for PromiseState<T> {
+impl<T: Display, E: Display> Debug for PromiseState<T, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PromiseState::Pending => write!(f, "Pending"),
             PromiseState::PendingResolve(_) => write!(f, "PendingResolve"),
-            PromiseState::PendingThen(_) => write!(f, "PendingThen(?)"),
+            PromiseState::PendingThen(v) => write!(f, "PendingThen({})", v),
             PromiseState::PendingCatch(e) => write!(f, "PendingCatch({})", e),
             PromiseState::Settled => write!(f, "Settled"),
         }
     }
 }
 
-impl<T: 'static> PromiseState<T> {
+impl<T: 'static, E: 'static> PromiseState<T, E> {
     fn on_callback<C>(&mut self, callback: C)
     where 
-        C: FnOnce(Result<T, BoxedError>) + 'static
+        C: FnOnce(Result<T, E>) + 'static
     {
         match self {
             PromiseState::Pending => {
@@ -149,7 +150,7 @@ impl<T: 'static> PromiseState<T> {
         }
     }
 
-    fn on_settle(&mut self, value: Result<T, BoxedError>) {
+    fn on_settle(&mut self, value: Result<T, E>) {
         match self {
             PromiseState::Pending => {
                 *self = match value {
@@ -178,14 +179,14 @@ impl<T: 'static> PromiseState<T> {
     }
 }
 
-pub struct Promise<T> {
-    state: Rc<RefCell<PromiseState<T>>>,
+pub struct Promise<T, E = BoxedError> {
+    state: Rc<RefCell<PromiseState<T, E>>>,
 }
 
-impl<T: 'static> Promise<T> {
+impl<T: 'static, E: 'static> Promise<T, E> {
     pub fn new<C>(run: C) -> Self 
     where 
-        C: FnOnce(PromiseResolveReject<T>) + 'static,
+        C: FnOnce(PromiseResolveReject<T, E>) + 'static,
     {
         let state = Rc::new(RefCell::new(PromiseState::Pending));
 
@@ -199,27 +200,20 @@ impl<T: 'static> Promise<T> {
         Self { state }
     }
 
-    pub fn reject<E>(err: E) -> Self 
-    where E: std::error::Error + Send + 'static,
-    {
-        let state = Rc::new(RefCell::new((PromiseState::PendingCatch(Box::new(err)))));
-        Self { state }
-    }
-
-    pub fn reject_boxed(err: BoxedError) -> Self
+    pub fn reject(err: E) -> Self
     {
         let state = Rc::new(RefCell::new((PromiseState::PendingCatch(err))));
         Self { state }
     }
 
-    fn handle_result<K: 'static>(
+    fn handle_result<K: 'static, KE: 'static>(
         self,
-        f: impl FnOnce(Result<T, BoxedError>) -> Result<K, BoxedError> + 'static
-    ) -> Promise<K> {
+        f: impl FnOnce(Result<T, E>) -> Result<K, KE> + 'static
+    ) -> Promise<K, KE> {
         let return_state = Rc::new(RefCell::new(PromiseState::Pending));
 
         let callback_state = return_state.clone();
-        self.state.borrow_mut().on_callback(move |result: Result<T, BoxedError>| {
+        self.state.borrow_mut().on_callback(move |result: Result<T, E>| {
             let result_k = f(result);
             callback_state.borrow_mut().on_settle(result_k);         
         });
@@ -228,43 +222,39 @@ impl<T: 'static> Promise<T> {
     }
 
     /// It's like .then() but the callback can return a Result, where Ok will continue the chain and Err will jump to the nearest catch
-    pub fn map<K: 'static, E>(
+    pub fn map<K: 'static>(
         self,
         f: impl FnOnce(T) -> Result<K, E> + 'static
-    ) -> Promise<K> 
-    where E: std::error::Error + Send + 'static,
-    {
+    ) -> Promise<K, E> {
         self.handle_result(move |result| {
             match result {
-                Ok(value) => f(value).map_err(|e| Box::new(e) as BoxedError),
+                Ok(value) => f(value),
                 Err(err) => Err(err),
             }
         })
     }
 
     /// It's like .catch() but the callback can return a Result, where Ok will continue the chain and Err will jump to the nearest catch
-    pub fn map_err<K: 'static, E>(
+    pub fn map_err<K: 'static, KE: 'static>(
         self,
-        f: impl FnOnce(BoxedError) -> Result<T, E> + 'static
-    ) -> Promise<T> 
-    where E: std::error::Error + Send + 'static,
-    {
+        f: impl FnOnce(E) -> Result<T, KE> + 'static
+    ) -> Promise<T, KE> {
         self.handle_result(move |result| {
             match result {
                 Ok(value) => Ok(value),
-                Err(err) => f(err).map_err(|e| Box::new(e) as BoxedError),
+                Err(err) => f(err),
             }
         })
     }
 
-    fn handle<K: 'static>(
+    fn handle<K: 'static, KE: 'static>(
         self,
-        f: impl FnOnce(Result<T, BoxedError>) -> Promise<K> + 'static
-    ) -> Promise<K> {
+        f: impl FnOnce(Result<T, E>) -> Promise<K, KE> + 'static
+    ) -> Promise<K, KE> {
         let return_state = Rc::new(RefCell::new(PromiseState::Pending));
 
         let callback_state = return_state.clone();
-        self.state.borrow_mut().on_callback(move |result: Result<T, BoxedError>| {
+        self.state.borrow_mut().on_callback(move |result: Result<T, E>| {
             let promise_k = f(result);
 
             promise_k.state.borrow_mut().on_callback(move |result_k| {
@@ -275,16 +265,22 @@ impl<T: 'static> Promise<T> {
         return Promise { state: return_state };
     }
 
-    pub fn then<K: 'static>( self, f: impl FnOnce(T) -> Promise<K> + 'static) -> Promise<K> {
+    pub fn then<K: 'static>(
+        self, 
+        f: impl FnOnce(T) -> Promise<K, E> + 'static
+    ) -> Promise<K, E> {
         self.handle(move |result| {
             match result {
                 Ok(value) => f(value),
-                Err(err) => Promise::reject_boxed(err),
+                Err(err) => Promise::reject(err),
             }
         })
     }
 
-    pub fn catch(self, f: impl FnOnce(BoxedError) -> Promise<T> + 'static) -> Promise<T> {
+    pub fn catch<KE: 'static>(
+        self, 
+        f: impl FnOnce(E) -> Promise<T, KE> + 'static
+    ) -> Promise<T, KE> {
         self.handle(move |result| {
             match result {
                 Ok(value) => Promise::resolve(value),
@@ -302,11 +298,11 @@ impl<T: 'static> Promise<T> {
 }
 
 /// Permite converter um Result em uma Promise, onde Ok se torna resolve e Err se torna reject
-impl<T: 'static, E: std::error::Error + Send + 'static> From<Result<T, E>> for Promise<T> {
+impl<T: 'static, E: 'static> From<Result<T, E>> for Promise<T, E> {
     fn from(result: Result<T, E>) -> Self {
         match result {
             Ok(v)  => Promise::resolve(v),
-            Err(e) => Promise::reject(Box::new(e)),
+            Err(e) => Promise::reject(e),
         }
     }
 }
@@ -328,7 +324,7 @@ mod tests {
     use std::time::Duration;
     use super::*;
 
-    fn delay(ms: u64) -> Promise<()> {
+    fn delay(ms: u64) -> Promise<(), BoxedError> {
         Promise::new(move |e| {
             EventLoop::set_timeout(move || {
                 e.resolve(());
@@ -338,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn test_promise() -> Result<(), BoxedError> {
+    fn test_promise() -> Result<(), EventLoopError> {
         EventLoop::spawn_remote(move || {
             let mut finally = Rc::new(RefCell::new(false));
 
@@ -351,8 +347,8 @@ mod tests {
             }).then(|vec| {
                 assert_eq!(vec, vec!["OK", "A", "B", "C"]);
                 Promise::resolve(())
-            }).catch(|e| {
-                panic!("Não deveria cair no catch");
+            }).catch(|e: ()| {
+                Promise::reject(new_error("Não deveria cair no catch!"))
             }).finally(move || {
                 *finally_clone.borrow_mut() = true;
             });
@@ -362,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn test_delay() -> Result<(), BoxedError> {
+    fn test_delay() -> Result<(), EventLoopError> {
         EventLoop::spawn_remote(move || {
             let start = std::time::Instant::now();
             Promise::resolve(()).then(|_| {
@@ -387,9 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn test_chaining() -> Result<(), BoxedError> {
+    fn test_chaining() -> Result<(), EventLoopError> {
         EventLoop::spawn_remote(move || {
-            let mut promise = Promise::resolve(0);
+            let mut promise: Promise<i32> = Promise::resolve(0);
             for i in 0..10000 {
                 promise = promise.then(move |counter| {
                     assert_eq!(counter, i);
