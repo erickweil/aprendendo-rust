@@ -7,7 +7,7 @@ edition = "2024"
 # Ninguém merece aviso que código não usado, calma aí eu vou usar ainda (algum dia)
 unused = "allow"
 # if you wish, you can even toss #![forbid(unsafe_code)] into your code base to statically guarantee that you're only writing Safe Rust.
-unsafe_code = "forbid"
+# unsafe_code = "forbid"
 
 [dependencies]
 crossterm = "0.29.0"

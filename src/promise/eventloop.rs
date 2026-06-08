@@ -248,24 +248,26 @@ impl EventLoop {
             },
             TimeoutQueueNext::Empty => {
                 // If there are no paused tasks and no timeouts scheduled, we can stop the event loop
-                return Err(EventLoopError::RequestStop);
+                return Err(EventLoopError::RequestStop);                
             }
             TimeoutQueueNext::NotReady(time_next) => time_next,
         };
 
         // 2. If there are no tasks or timeouts to run, wait for a remote task to be spawned or a timeout to be ready
-        return EventLoop::with_unchecked(|e| {
-            let maybe_remote_task = match e.event_loop_rx.recv_timeout(time_next) {
-                Ok(task) => Some(task),
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(e) => return Err(EventLoopError::ChannelError(e)),
-            };
-
-            if let Some(remote_task) = maybe_remote_task {
-                e.task_queue.push_back(remote_task);
+        let maybe_remote_task = EventLoop::with_unchecked(|e| {
+            match e.event_loop_rx.recv_timeout(time_next) {
+                Ok(task) => Ok(Some(task)),
+                Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+                Err(e) => Err(EventLoopError::ChannelError(e)),
             }
-            return Ok(())
-        });
+        })?;
+
+        if let Some(task) = maybe_remote_task {
+            task()?;
+            return Ok(());
+        }
+
+        Ok(())
     }
 
     /// Schedule a task with maximum priority that when executed will stop the event loop
