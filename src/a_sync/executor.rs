@@ -13,10 +13,12 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
+use crate::estruturas::VecPool;
+
 pub type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
 /// Identificador único de uma tarefa dentro do executor.
-pub type TaskId = u64;
+pub type TaskId = usize;
 
 struct Task {
     future: BoxedFuture<'static, ()>,
@@ -24,19 +26,17 @@ struct Task {
 }
 
 thread_local! {
-    static EXECUTOR_DATA: OnceCell<(RefCell<AsyncExecutor>, mpsc::Receiver<TaskId>)> =
-        OnceCell::new();
+    static EXECUTOR_DATA: OnceCell<RefCell<AsyncExecutor>> = const { OnceCell::new() };
 }
 
 pub struct AsyncExecutor {
     /// Futures vivas, indexadas por TaskId. Ficam nesta thread — podem ser `!Send`.
-    tasks: HashMap<TaskId, Task>,
-    /// Fila de tarefas prontas para serem poladas.
-    ready_queue: VecDeque<TaskId>,
+    /// VecPool é minha própria implementação de Slab/slotmap
+    tasks: VecPool<Option<Task>>,
     /// Ponta de envio do canal. Clonada para cada Waker criado.
     sender: mpsc::Sender<TaskId>,
-    /// Contador para gerar TaskIds únicos.
-    next_id: TaskId,
+    /// Ponta de recepção do canal, usada para receber notificações de Wakers.
+    receiver: mpsc::Receiver<TaskId>
 }
 
 // ---------------------------------------------------------------------------
@@ -67,22 +67,18 @@ impl Wake for WakerData {
 impl AsyncExecutor {
     pub fn with_current<F, R>(f: F) -> R
     where
-        F: FnOnce(&RefCell<AsyncExecutor>, &mpsc::Receiver<TaskId>) -> R,
+        F: FnOnce(&RefCell<AsyncExecutor>) -> R,
     {
         EXECUTOR_DATA.with(|cell| {
-            let (executor, receiver) = cell.get_or_init(|| {
+            let executor = cell.get_or_init(|| {
                 let (sender, receiver) = mpsc::channel();
-                (
-                    RefCell::new(AsyncExecutor {
-                        tasks: HashMap::new(),
-                        ready_queue: VecDeque::new(),
-                        sender,
-                        next_id: 0,
-                    }),
-                    receiver,
-                )
+                RefCell::new(AsyncExecutor {
+                    tasks: VecPool::new(),
+                    sender,
+                    receiver
+                })
             });
-            f(executor, receiver)
+            f(executor)
         })
     }
 
@@ -90,71 +86,67 @@ impl AsyncExecutor {
     where
         F: Future<Output = ()> + 'static,
     {
-        AsyncExecutor::with_current(|executor,_| {
+        AsyncExecutor::with_current(|executor| {
             let mut executor = executor.borrow_mut();
-            let id = executor.next_id;
-            executor.next_id += 1;
+            let task_id = executor.tasks.alloc_node(None);
 
             let waker = Waker::from(Arc::new(WakerData {
-                task_id: id,
+                task_id: task_id,
                 sender: executor.sender.clone(),
             }));
 
-            executor.tasks.insert(id, Task {
+            let node = executor.tasks.get_mut_node(task_id).unwrap();
+            *node = Some(Task {
                 future: Box::pin(future),
                 waker
             });
-            executor.ready_queue.push_back(id);
+
+            executor.sender.send(task_id).ok();
         });
     }
 
     /// Roda o executor, processando as tarefas até que todas sejam concluídas.
+    /// Só deve chamar uma vez, e bloqueia a thread até que todas as tarefas terminem.
     pub fn run() -> Result<(), mpsc::RecvError> {
         loop {
-            // --- Fase de poll: processa todas as tarefas prontas ---
-            loop {
-                // Obtém uma task que está pronta
-                let Some((task_id, mut task)) = AsyncExecutor::with_current(|executor, _| {
-                    let mut executor = executor.borrow_mut();
-                    let id = executor.ready_queue.pop_front()?;
-                    let task = executor.tasks.remove(&id)?;
-                    Some((id, task))
-                }) else {
-                    break; // Nenhuma tarefa pronta, pode parar
-                };
-
-                let mut cx = Context::from_waker(&task.waker);
-                match task.future.as_mut().poll(&mut cx) {
-                    Poll::Ready(()) => {
-                        // Tarefa concluída — descarta a Future.
-                    }
-                    Poll::Pending => {
-                        // Reinsere a Future; o Waker a reagendará pelo canal quando pronta.
-                        AsyncExecutor::with_current(|executor, _| {
-                            executor.borrow_mut().tasks.insert(task_id, task);
-                        });
-                    }
-                }
-            }
-
-            // --- Verifica se há tarefas restantes ---
-            if AsyncExecutor::with_current(|executor, _| executor.borrow().tasks.is_empty()) {
-                return Ok(());
-            }
-
             // --- Aguarda (bloqueando) até pelo menos um Waker disparar ---
-            AsyncExecutor::with_current(|executor, receiver| {
+            let Some((task_id, mut task)) = AsyncExecutor::with_current(|executor| {
                 let mut executor = executor.borrow_mut();
 
-                let first = receiver.recv()?;
-                executor.ready_queue.push_back(first);
-                // Drena o restante do buffer para minimizar idas e vindas ao canal.
-                for id in receiver.try_iter() {
-                    executor.ready_queue.push_back(id);
+                if executor.tasks.len() == 0 {
+                    return Ok(None);
                 }
 
-                Ok(())
-            })?;
+                loop {
+                    let task_id = executor.receiver.recv()?;
+                    let maybe_task_slot = executor.tasks.get_mut_node(task_id);
+                    if let Some(task_slot) = maybe_task_slot {
+                        let task = task_slot.take().unwrap();
+                        return Ok(Some((task_id, task)));
+                    } else {
+                        eprintln!("Warning: Received task_id {} but it was not found in tasks map, ignoring it", task_id);
+                    }
+                }
+            })? else {
+                // Não há tarefas restantes, o executor pode encerrar.
+                return Ok(());
+            };
+            
+            let mut cx = Context::from_waker(&task.waker);
+            if let Poll::Pending = task.future.as_mut().poll(&mut cx) {
+                // Reinsere a Future no mesmo slot, pois o Waker a reagendará pelo canal usando o mesmo ID quando pronta.
+                AsyncExecutor::with_current(|executor| {
+                    let mut executor = executor.borrow_mut();
+                    let task_slot = executor.tasks.get_mut_node(task_id).unwrap();
+                    *task_slot = Some(task);
+                });
+            } else {
+                // Tarefa concluída, Libera o slot do pool.
+                AsyncExecutor::with_current(|executor| {
+                    let mut executor = executor.borrow_mut();
+                    executor.tasks.free_node(task_id);
+                });
+            }
         }
     }
 }

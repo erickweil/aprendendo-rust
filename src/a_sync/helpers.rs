@@ -1,4 +1,4 @@
-use std::{pin::Pin, task::{Context, Poll}};
+use std::{future::Future, ops::DerefMut, pin::Pin, sync::{Arc, Mutex}, task::{Context, Poll, Waker}, thread, time::{Duration, Instant}};
 
 pub struct Yield {
     ticks: u8,
@@ -32,5 +32,52 @@ impl Yield {
 
     pub fn ticks(ticks: u8) -> impl Future<Output = ()> {
         Self { ticks }
+    }
+}
+
+
+pub struct Sleep {
+    deadline: Instant,
+    timer_started: bool,
+}
+
+impl Sleep {
+    /// Future que 'pausa' por um tempo determinado
+    /// Ex: `Sleep::duration(Duration::from_secs(1)).await` cede a execução por 1 segundo e só volta a executar depois disso.
+    /// Obs: É uma implementação de exemplo, o timer é implementado com uma thread separada. 
+    pub fn duration(dur: Duration) -> Self {
+        Self {
+            deadline: Instant::now() + dur,
+            timer_started: false,
+        }
+    }
+}
+
+impl Future for Sleep {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Já passou do deadline? Pronto.
+        if Instant::now() >= self.deadline {
+            return Poll::Ready(());
+        }
+
+        // Spawna a thread de timer apenas uma vez
+        if !self.timer_started {
+            self.timer_started = true;
+
+            let deadline = self.deadline;
+            let waker = cx.waker().clone();
+            thread::spawn(move || {
+                let now = Instant::now();
+                if deadline > now {
+                    thread::sleep(deadline - now);
+                }
+                // Acorda o executor
+                waker.wake();
+            });
+        }
+
+        Poll::Pending
     }
 }
